@@ -272,10 +272,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // the raffle must be in progress to be cancelled
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
 
-        // Delete the object from storage
-        delete raffles[_raffleId];
-        
         // Set is as REFUNDED
+        raffles[_raffleId].raffleOwner = address(0);
         raffles[_raffleId].raffleState = RaffleState.REFUNDED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
 
