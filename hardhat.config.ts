@@ -1,7 +1,8 @@
 import dotenv from "dotenv";
 import { HardhatUserConfig } from "hardhat/types";
 import "@nomiclabs/hardhat-ethers";
-import 'solidity-coverage'
+import "@nomicfoundation/hardhat-chai-matchers";
+import 'solidity-coverage';
 import { ethers } from "ethers";
 
 dotenv.config();

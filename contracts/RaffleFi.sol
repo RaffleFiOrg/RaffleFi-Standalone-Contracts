@@ -91,7 +91,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error ERC20NotTransferred();
     error TicketsSoldOut();
     error NotEnoughTicketsAvailable();
-    error OnlyRandomizer();
     error RaffleDoesNotExist();
     error RaffleEnded();
     error RaffleNotEnded();
@@ -166,11 +165,14 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external returns (uint256 _raffleId) {
-
+        // the raffle must last at least 1 hour
         if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
+        // the creator must own the NFT
         if (IERC721(assetContract).ownerOf(nftIdOrAmount) != msg.sender) revert NotYourAsset();
+        // at least 2 tickets
         if (numberOfTickets < MINIUM_NUMBER_OF_TICKETS) revert NotEnoughTickets();
         
+        // store the raffle data
         unchecked {
             _raffleId = ++raffleCounter;
             raffles[_raffleId] = RaffleData({
@@ -191,7 +193,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
             emit NewRaffleCreated(_raffleId);
 
             // transfer NFT 
-            IERC721(assetContract).safeTransferFrom(msg.sender, address(this), nftIdOrAmount);
+            IERC721(assetContract).transferFrom(msg.sender, address(this), nftIdOrAmount);
+            // make sure that the NFT was transferred
             if (IERC721(assetContract).ownerOf(nftIdOrAmount) != address(this)) revert NFTNotTransferred();
         }
     }
@@ -214,6 +217,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external payable returns (uint256 _raffleId) {
+        // raffle must last at least 1 hour
         if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
         // if creating a raffle using Ether as the asset raffled
         if (assetContract == address(0)) {
@@ -263,7 +267,9 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     function cancelRaffle(uint256 _raffleId) external {
         RaffleData memory raffleData = raffles[_raffleId];
 
+        // cannot cancel someone else's raffle
         if (msg.sender != raffleData.raffleOwner) revert NotYourRaffle();
+        // the raffle must be in progress to be cancelled
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
 
         // Delete the object from storage
@@ -276,7 +282,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // Check which type of asset 
         if (raffleData.raffleType == RaffleType.ERC721) {
             // Transfer the NFT back to the raffle owner
-            IERC721(raffleData.assetContract).safeTransferFrom(address(this), raffleData.raffleOwner, raffleData.nftIdOrAmount);
+            IERC721(raffleData.assetContract).transferFrom(address(this), raffleData.raffleOwner, raffleData.nftIdOrAmount);
         } else if (raffleData.raffleType == RaffleType.ERC20) {
             // Transfer the amount back to the raffle owner
             if (raffleData.assetContract == address(0)) _handleNativeTransfer(raffleData.raffleOwner, raffleData.nftIdOrAmount);
@@ -353,16 +359,16 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
             if (raffleData.raffleType == RaffleType.ERC721) {
                 IERC721(
                     raffleData.assetContract
-                ).safeTransferFrom(
+                ).transferFrom(
                     address(this), 
                     raffleData.raffleOwner, 
                     raffleData.nftIdOrAmount
                 );
             }
             if (raffleData.raffleType == RaffleType.ERC20) {
-                    ERC20(raffleData.currency).safeTransfer(
-                        raffleData.raffleOwner, 
-                        raffleData.nftIdOrAmount
+                ERC20(raffleData.currency).safeTransfer(
+                    raffleData.raffleOwner, 
+                    raffleData.nftIdOrAmount
                 );
             }
             // set state to refunded
@@ -407,7 +413,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
 
         // Sending the asset/s to the winner
         if (raffleData.raffleType == RaffleType.ERC721){
-            IERC721(raffleData.assetContract).safeTransferFrom(address(this), winner, raffleData.nftIdOrAmount);
+            IERC721(raffleData.assetContract).transferFrom(address(this), winner, raffleData.nftIdOrAmount);
         } else if (raffleData.raffleType == RaffleType.ERC20){
             ERC20(raffleData.currency).safeTransfer(winner, raffleData.nftIdOrAmount);
         }
