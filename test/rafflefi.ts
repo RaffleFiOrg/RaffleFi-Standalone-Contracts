@@ -259,17 +259,131 @@ describe("RaffleFi", function () {
     })
 
     describe("Buy", () => {
-        it("should allow to buy a ticket for an ERC721 raffle", async () => {})
-        it("should allow to buy a ticket for an ERC20 raffle", async () => {})
-        it("should allow to buy multiple tickets for an ERC721 raffle", async () => {})
-        it("should allow to buy multiple tickets for an ERC20 raffle", async () => {})
-        it("should not allow to buy more tickets than the available ones", async () => {})
-        it("should emit an event when buying a ticket", async () => {})
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        const numOfTickets = 10
+        beforeEach(async () =>  {
+            // raffle 1 ERC721
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                numOfTickets,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await USDT.connect(user1).approve(raffleFi.address, utils.parseUnits("1", 18))
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                new Date().valueOf() + 10000,
+                numOfTickets,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+        })
+        it("should allow to buy a ticket for an ERC721 raffle", async () => {
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.connect(user2).buyRaffleTicket(1, 1, [])
+            const raffle = await raffleFi.raffles(1)
+            expect(raffle.ticketsSold).to.be.eq(1)
+            
+        })
+        it("should allow to buy a ticket for an ERC20 raffle", async () => {
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC)
+            await raffleFi.connect(user2).buyRaffleTicket(2, 1, [])
+            const raffle = await raffleFi.raffles(2)
+            expect(raffle.ticketsSold).to.be.eq(1)
+        })
+        it("should allow to buy multiple tickets for an ERC721 raffle", async () => {
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
+            const raffle = await raffleFi.raffles(1)
+            expect(raffle.ticketsSold).to.be.eq(10)
+        })
+        it("should allow to buy multiple tickets for an ERC20 raffle", async () => {
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 10, [])
+            const raffle = await raffleFi.raffles(2)
+            expect(raffle.ticketsSold).to.be.eq(10)
+        })
+        it("should not allow to buy more tickets than the available ones", async () => {
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await expect(raffleFi.connect(user2).buyRaffleTicket(1, 11, []))
+            .to.be.revertedWithCustomError(raffleFi, "NotEnoughTicketsAvailable")
+        })
+        it("should not allow to buy tickets once sold out", async () => {
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(11))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 10, [])
+            await expect(raffleFi.buyRaffleTicket(2, 1, []))
+            .to.be.revertedWithCustomError(raffleFi, "TicketsSoldOut")
+        })
+        it("should allow to buy a ticket for a whitelisted raffle", async () => {
+        })
+        it("should emit an event when buying a ticket", async () => {
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT)
+            await expect(raffleFi.connect(user2).buyRaffleTicket(1, 1, []))
+            .to.emit(raffleFi, 'NewRaffleTicketBought')
+            .withArgs(BigNumber.from(1), user2Address, BigNumber.from(1), BigNumber.from(0), BigNumber.from(0))
+        })
     })
 
     describe("Refund", () => {
-        it("should allow to refund a ticket for an ERC721 raffle if cancelled", async () => {})
-        it("should allow to refund a ticket for an ERC20 raffle if cancelled", async () => {})
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        beforeEach(async () =>  {
+            // raffle 1 ERC721
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+
+            // buy tickets on raffle one
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
+
+            // cancel raffle one 
+            await raffleFi.connect(user1).cancelRaffle(1)
+        })
+        it("should allow to refund a ticket for an ERC721 raffle if cancelled", async () => {
+            const balanceBefore = await USDT.balanceOf(user2Address)
+            await raffleFi.connect(user2).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            const balanceAfter = await USDT.balanceOf(user2Address)
+            expect(balanceBefore.add(ticketPriceUSDT.mul(10))).to.be.eq(balanceAfter)
+        })
+        it("should allow to refund a ticket for an ERC20 raffle if cancelled", async () => {
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 10, [])
+            await raffleFi.connect(user1).cancelRaffle(2)
+            const balanceBefore = await USDC.balanceOf(user2Address)
+            await raffleFi.connect(user2).claimCancelledRaffle(2, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            const balanceAfter = await USDC.balanceOf(user2Address)
+            expect(balanceBefore.add(ticketPriceUSDC.mul(10))).to.be.eq(balanceAfter)
+        })
+        it("should not refund twice", async () => {})
         it("should not refund if no tickets were bought", async () => {})
         it("should not refund someone else's ticket", async () => {})
         it("should emit an event when refunding a ticket", async () => {})

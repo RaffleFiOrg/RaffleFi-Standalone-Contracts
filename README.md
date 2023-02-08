@@ -7,7 +7,7 @@ RaffleFi is a protocol that can be used to create on chain raffles.
 1. clone the repo: `git clone https://github.com/RaffleFiOrg/RaffleFi-Standalone-Contracts.git`
 2. install deps: `yarn`
 
-## Test
+## Test
 
 To run unit tests please use:
 
