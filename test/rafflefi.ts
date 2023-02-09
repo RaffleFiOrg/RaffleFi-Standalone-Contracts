@@ -383,10 +383,23 @@ describe("RaffleFi", function () {
             const balanceAfter = await USDC.balanceOf(user2Address)
             expect(balanceBefore.add(ticketPriceUSDC.mul(10))).to.be.eq(balanceAfter)
         })
-        it("should not refund twice", async () => {})
-        it("should not refund if no tickets were bought", async () => {})
-        it("should not refund someone else's ticket", async () => {})
-        it("should emit an event when refunding a ticket", async () => {})
+        it("should not refund twice", async () => {
+            const balanceBefore = await USDT.balanceOf(user2Address)
+            await raffleFi.connect(user2).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            const balanceAfter = await USDT.balanceOf(user2Address)
+            expect(balanceBefore.add(ticketPriceUSDT.mul(10))).to.be.eq(balanceAfter)
+            await expect(raffleFi.connect(user2).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])).
+            to.be.revertedWithCustomError(raffleFi, "NotTicketOwner")
+
+        })
+        it("should not refund if no tickets were bought", async () => {
+            await expect(raffleFi.connect(user3).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))
+            .to.be.revertedWithCustomError(raffleFi, "NotTicketOwner")
+        })
+        it("should not refund someone else's ticket", async () => {
+            await expect(raffleFi.connect(user3).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))
+            .to.be.revertedWithCustomError(raffleFi, "NotTicketOwner")
+        })
     })
 
     describe("Complete", () => {
