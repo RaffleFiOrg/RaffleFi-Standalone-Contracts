@@ -78,7 +78,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @notice LINK Fee for VRF request
     uint64 public immutable linkFee;
 
-    /// custom errors 
+    /// @notice custom errors 
     error NotYourRaffle();
     error RaffleNotInProgress();
     error InvalidEndDate();
@@ -102,7 +102,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error RaffleAlreadyCompleted();
     error LinkFeeNotPaid();
 
-    /// events 
+    /// @notice events 
     event NewRaffleCreated(uint256 raffleId);
     event RaffleCancelled(uint256 raffleId);
     event RaffleStateChanged(
@@ -271,10 +271,11 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // cannot cancel someone else's raffle
         if (msg.sender != raffleData.raffleOwner) revert NotYourRaffle();
         // the raffle must be in progress to be cancelled
+        // if (raffleData.raffleWinner != address(0)) revert RaffleClaimed(); 
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
 
         // Set is as REFUNDED
-        raffles[_raffleId].raffleOwner = address(0);
+        // raffles[_raffleId].raffleOwner = address(0);
         raffles[_raffleId].raffleState = RaffleState.REFUNDED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
 
@@ -345,37 +346,54 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
 
     /// @notice Allows users to complete a Raffle. The winner of the raffle will receive the asset.
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
-    function completeRaffle(uint256 _raffleId) external {
+    /// @param accept <bool> If the user accepts the raffle to be completed
+    function completeRaffle(uint256 _raffleId, bool accept) external {
         RaffleData memory raffleData = raffles[_raffleId];
+        // raffle must exist
         if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
+        // raffle must be in progress
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
-      
+        // only the raffle owner can complete - as they can decide whether to end with less tickets
+        if (msg.sender != raffleData.raffleOwner) revert NotYourRaffle();
+
         // we can complete if we sold all tickets or if the raffle deadline has passed
         if (raffleData.ticketsSold != raffleData.numberOfTickets) {
             if (block.timestamp < raffleData.endTimestamp) revert RaffleNotEnded();
         }
 
         // In this case we must refund all the ticket buyers
+        // unless the raffle owner accepts to complete the raffle with less tickets
+        // being sold
         if (raffleData.ticketsSold < raffleData.numberOfTickets) {
-            // Send the asset(s) back to the raffleOwner
-            if (raffleData.raffleType == RaffleType.ERC721) {
-                IERC721(
-                    raffleData.assetContract
-                ).transferFrom(
-                    address(this), 
-                    raffleData.raffleOwner, 
-                    raffleData.nftIdOrAmount
-                );
+            // caller does not accept less tickets being sold
+            // hence we refund all the ticket buyers
+            if (!accept) {
+                // Send the asset(s) back to the raffleOwner
+                if (raffleData.raffleType == RaffleType.ERC721) {
+                    IERC721(
+                        raffleData.assetContract
+                    ).transferFrom(
+                        address(this), 
+                        raffleData.raffleOwner, 
+                        raffleData.nftIdOrAmount
+                    );
+                }
+                if (raffleData.raffleType == RaffleType.ERC20) {
+                    ERC20(raffleData.currency).safeTransfer(
+                        raffleData.raffleOwner, 
+                        raffleData.nftIdOrAmount
+                    );
+                }
+                // set state to refunded
+                raffles[_raffleId].raffleState = RaffleState.REFUNDED;
+                emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
+            } else {
+                /// @notice This will mark the raffle State as FINISHED. Can only be called once.
+                uint256 vrfRequestId = _requestRandomness(_raffleId);
+                vrfRequestToRaffleID[vrfRequestId] = _raffleId;
+
+                emit VRFRequest(vrfRequestId);
             }
-            if (raffleData.raffleType == RaffleType.ERC20) {
-                ERC20(raffleData.currency).safeTransfer(
-                    raffleData.raffleOwner, 
-                    raffleData.nftIdOrAmount
-                );
-            }
-            // set state to refunded
-            raffles[_raffleId].raffleState = RaffleState.REFUNDED;
-            emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
         } else {
             /// @notice This will mark the raffle State as FINISHED. Can only be called once.
             uint256 vrfRequestId = _requestRandomness(_raffleId);
@@ -440,11 +458,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // refund the user
         ERC20(raffleData.currency).safeTransfer(msg.sender, totalRefund);
     }
-
-    /** ############################################################################################
-     *              INTERNAL/PRIVATE FUNCTIONS
-     *  ############################################################################################
-     */
 
     /// @notice Requests randomness to ChainLink VRF
     /// @param _raffleId <uint256> The ID of the raffle
@@ -522,11 +535,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // make sure the fee is paid
         if (linkBalanceBefore + linkFee != linkBalanceAFter) revert LinkFeeNotPaid();
     }
-
-    /** ############################################################################################
-     *                 VIEW FUNCTIONS
-     *  ############################################################################################
-     */
 
     /// @notice Returns the raffle details
     /// @param _raffleId <uint256> The ID of the raffle
