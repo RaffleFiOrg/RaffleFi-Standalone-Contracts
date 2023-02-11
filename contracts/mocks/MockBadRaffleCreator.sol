@@ -26,6 +26,10 @@ interface IRaffleFi {
     function cancelRaffle(
         uint256 raffleId 
     ) external;
+    function completeRaffle(
+        uint256 raffleId,
+        bool approve 
+    ) external;
 }
 
 contract MockBadRaffleCreator {
@@ -87,6 +91,10 @@ contract MockBadRaffleCreator {
         raffleFi.cancelRaffle(raffleId);
     }
 
+    function completeRaffle(uint256 raffleId, bool accept) external {
+        raffleFi.completeRaffle(raffleId, accept);
+    }
+    
     receive() external payable {
         revert("MockBadRaffleCreator: cannot receive ETH");
     }

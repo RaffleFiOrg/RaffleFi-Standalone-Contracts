@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { HardhatUserConfig } from "hardhat/types";
 import "@nomiclabs/hardhat-ethers";
 import "@nomicfoundation/hardhat-chai-matchers";
+import "@nomicfoundation/hardhat-network-helpers";
 import 'solidity-coverage';
 import { ethers } from "ethers";
 
@@ -25,19 +26,16 @@ const config: HardhatUserConfig = {
       blockGasLimit: GAS_LIMIT,
       accounts: { count: 30, mnemonic: WALLET_MNEMONIC },
       chainId: CHAIN_IDS.hardhat,
-    },
-    localhost: {
-      url: "http://127.0.0.1:8545",
-      gas: GAS_LIMIT,
-      blockGasLimit: GAS_LIMIT,
-      accounts: { count: 30, mnemonic: WALLET_MNEMONIC },
+      forking: {
+        url: process.env.RPC_URL_GOERLI || "https://eth-goerli.public.blastapi.io",
+      }
     },
     goerli: {
-      url: process.env.GOERLI_ETH_RPC || "https://eth-goerli.public.blastapi.io	",
-      accounts: [process.env.PRIVATE_KEY_MAINNET || randomPrivKey],
+      url: process.env.RPC_URL_GOERLI || "https://eth-goerli.public.blastapi.io	",
+      accounts: [process.env.PRIV_KEY || randomPrivKey, process.env.PRIV_KEY_2 || randomPrivKey, process.env.PRIV_KEY_3 || randomPrivKey],
       gas: GAS_LIMIT,
       blockGasLimit: GAS_LIMIT,
-      chainId: 5
+      chainId: CHAIN_IDS.goerli
     }
   },
   paths: {
@@ -55,6 +53,7 @@ const config: HardhatUserConfig = {
         }
       },
     },
+  
    
   },
 };

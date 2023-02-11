@@ -1,12 +1,29 @@
-import chai, { expect } from "chai"
+import { expect } from "chai"
 import { BigNumber, Contract, ContractFactory, utils, Signer, constants } from "ethers";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
+import keccak256  from 'keccak256';
+import { MerkleTree } from 'merkletreejs'
+
+interface WhitelistData {
+    proof: string[],
+    rootHash: string
+}
+
+/// @notice create a merkle tree from a list of addresses and return 
+/// the proof for the first one
+const createMerkleTree = (addresses: string[]): WhitelistData => {
+    const leafNodes = addresses.map((addr: string) => keccak256(addr))
+    const merkleTree = new MerkleTree(leafNodes, keccak256, {sortPairs: true})
+    const rootHash = `0x${merkleTree.getRoot().toString("hex")}`
+    return {
+        proof: merkleTree.getHexProof(leafNodes[0]),
+        rootHash: rootHash
+    }
+}
 
 describe("RaffleFi", function () {
     let raffleFiFactory: ContractFactory
     let raffleFi: Contract 
-    let LINKContract: Contract 
-    let LINK: string = "0x326C977E6efc84E512bB9C30f76E30c160eD06FB"
     let WETH: Contract
     let USDT: Contract 
     let ERC20: Contract
@@ -15,23 +32,27 @@ describe("RaffleFi", function () {
     let erc721_1: Contract
     let erc721_2: Contract
     let badReceiver: Contract
+    let LINKContract: Contract 
 
     let user1: Signer 
     let user2: Signer 
     let user3: Signer 
     let user1Address: string
     let user2Address: string
-    let user3Address: string
 
-    const VRFWrapper: string = "0x708701a1DfF4f478de54383E49a627eD4852C816"
-
+    if (!process.env.GOERLI_LINK || !process.env.GOERLI_VRF_WRAPPER || !process.env.GOERLI_LINK_WHALE) {
+        throw new Error("Missing config")
+    }
     const LINK_FEE = utils.parseEther("0.25")
+    const LINK_ADDR = process.env.GOERLI_LINK!
+    const VRF_WRAPPER_ADDR = process.env.GOERLI_VRF_WRAPPER!
+    const LINK_WHALE = process.env.GOERLI_LINK_WHALE!
+
 
     beforeEach(async () => {
         [user1, user2, user3] = await ethers.getSigners()
         user1Address = await user1.getAddress()
         user2Address = await user2.getAddress()
-        user3Address = await user3.getAddress()
 
         const WETHFactory = await ethers.getContractFactory("MockWETH")
         WETH = await WETHFactory.deploy('WETH', 'WETH')
@@ -39,8 +60,11 @@ describe("RaffleFi", function () {
         USDT = await ERC20Factory.deploy('USDT', 'USDT', 18)
         USDC = await ERC20Factory.deploy('USDC', 'USDC', 6)
         ERC20 = await ERC20Factory.deploy('ERC20', 'ERC20', 18)
-        LINKContract = await ERC20Factory.deploy('LINK', 'LINK', 18)
 
+        // impersonate LINK whale and transfer tokens
+        const whale = await ethers.getImpersonatedSigner(LINK_WHALE)
+        LINKContract = await ethers.getContractAt("MockERC20", LINK_ADDR, whale)
+      
         const FeeOnTransferFactory = await ethers.getContractFactory("MockERC20Fee")
         FeeOnTransferToken = await FeeOnTransferFactory.deploy('FOTT', 'FOTT', 18)
         
@@ -52,7 +76,7 @@ describe("RaffleFi", function () {
         raffleFi = await raffleFiFactory.deploy(
             WETH.address,
             LINKContract.address,
-            VRFWrapper,
+            VRF_WRAPPER_ADDR,
             1,
             100000,
             3,
@@ -67,27 +91,20 @@ describe("RaffleFi", function () {
         await erc721_1.mint(user1Address)
         await erc721_1.mint(user2Address)
         await erc721_1.mint(user2Address)
-        await erc721_1.mint(user3Address)
-        await erc721_1.mint(user3Address)
         await erc721_1.mint(badReceiver.address)
 
         // mint some tokens
         await USDT.mint(user1Address, utils.parseUnits("1000", 18))
         await USDT.mint(user2Address, utils.parseUnits("1000", 18))
-        await USDT.mint(user3Address, utils.parseUnits("1000", 18))
         await USDC.mint(user1Address, utils.parseUnits("1000", 6))
         await USDC.mint(user2Address, utils.parseUnits("1000", 6))
-        await USDC.mint(user3Address, utils.parseUnits("1000", 6))
         await ERC20.mint(user1Address, utils.parseUnits("1000", 18))
         await ERC20.mint(user2Address, utils.parseUnits("1000", 18))
-        await ERC20.mint(user3Address, utils.parseUnits("1000", 18))
         await FeeOnTransferToken.mint(user1Address, utils.parseUnits("1000", 18))
         await FeeOnTransferToken.mint(user2Address, utils.parseUnits("1000", 18))
-        await FeeOnTransferToken.mint(user3Address, utils.parseUnits("1000", 18))
-        await LINKContract.mint(user1Address, utils.parseUnits("1000", 18))
-        await LINKContract.mint(user2Address, utils.parseUnits("1000", 18))
-        await LINKContract.mint(user3Address, utils.parseUnits("1000", 18))
-        await LINKContract.mint(badReceiver.address, utils.parseUnits("1000", 18))
+        await LINKContract.connect(whale).transfer(user1Address, utils.parseEther("10000"))
+        await LINKContract.connect(whale).transfer(user2Address, utils.parseEther("10000"))
+        await LINKContract.connect(whale).transfer(badReceiver.address, utils.parseEther("10000"))
     })
 
     describe("Setup", async () => {
@@ -285,7 +302,7 @@ describe("RaffleFi", function () {
         it("allows to create a raffle using a smart contract", async () => {
             await badReceiver.connect(user1).createRaffle(
                 erc721_1.address,
-                7,
+                5,
                 USDT.address,
                 new Date().valueOf() + 10000,
                 10,
@@ -294,6 +311,22 @@ describe("RaffleFi", function () {
             )
             const raffle = await raffleFi.raffles(1)
             expect(raffle.raffleOwner).to.be.eq(badReceiver.address)
+        })
+        it("should allow to create a raffle with a whitelist", async () => {
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            const merkleRoot = createMerkleTree([user1Address, user2Address]).rootHash
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                utils.parseUnits("1", 18),
+                merkleRoot,
+            )
+            const raffle = await raffleFi.raffles(1)
+            expect(raffle.MerkleRoot).to.be.eq(merkleRoot)
         })
     })
 
@@ -381,7 +414,7 @@ describe("RaffleFi", function () {
         it("should still allow the raffle creator to cancel and get their asset back if there is an error with buying tickets", async () => {
             // Ticket buy failure
             // create raffle with fee on transfer
-            await LINKContract.approve(raffleFi.address, LINK_FEE)
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
             const ticketPriceFeeOnTransfer = utils.parseUnits("100000", 18)
             const nftToBeRaffled = 2
             await erc721_1.connect(user1).approve(raffleFi.address, nftToBeRaffled)
@@ -444,6 +477,25 @@ describe("RaffleFi", function () {
             await badReceiver.connect(user1).cancelRaffle(3)
             const wethBalance = await WETH.balanceOf(badReceiver.address)
             expect(wethBalance).to.be.eq(utils.parseUnits("1", 18))
+        })
+        it("should allow to cancel a whitelisted raffle", async () => {
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            const merkleRoot = createMerkleTree([user1Address, user2Address]).rootHash
+            expect(await erc721_1.ownerOf(2)).to.be.eq(user1Address)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                utils.parseUnits("1", 18),
+                merkleRoot,
+            )
+            expect(await erc721_1.ownerOf(2)).to.be.eq(raffleFi.address)
+            await raffleFi.connect(user1).cancelRaffle(3)
+            expect(await raffleFi.getRaffleState(3)).to.be.eq(3)
+            expect(await erc721_1.ownerOf(2)).to.be.eq(user1Address)
         })
     })
 
@@ -547,6 +599,66 @@ describe("RaffleFi", function () {
             await FeeOnTransferToken.connect(user2).approve(raffleFi.address, ticketPriceFeeOnTransfer)    
             await expect(raffleFi.connect(user2).buyRaffleTicket(3, 1, [])).to.be.revertedWithCustomError(raffleFi, "ERC20NotTransferred")
         })
+        it("should allow to buy tickets for a whitelisted raffle", async () => {
+            // create whitelisted raffle
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            const merkleTreeData = createMerkleTree([user2Address, user1Address])
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                merkleTreeData.rootHash
+            )
+            // buy ticket
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.connect(user2).buyRaffleTicket(3, 1, merkleTreeData.proof)
+            const raffle = await raffleFi.raffles(3)
+            expect(raffle.ticketsSold).to.be.eq(1)
+            const ticketOwner = await raffleFi.getTicketOwner(3, 0)
+            expect(ticketOwner).to.be.eq(user2Address)
+        })
+        it("should not allow to buy tickets for a whitelisted raffle without a valid proof and being whitelisted", async () => {
+            // create whitelisted raffle
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            const merkleTreeData = createMerkleTree([user2Address, user1Address])
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                merkleTreeData.rootHash
+            )
+            // buy ticket
+            await USDT.connect(user3).approve(raffleFi.address, ticketPriceUSDT)
+            await expect(raffleFi.connect(user3).buyRaffleTicket(3, 1, []))
+            .to.be.revertedWithCustomError(raffleFi, "UserNotWhitelisted")
+        })
+        it("should not allow to buy tickets for a whitelisted raffle with a valid proof of another user", async () => {
+            // create whitelisted raffle
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            const merkleTreeData = createMerkleTree([user2Address, user1Address])
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                merkleTreeData.rootHash
+            )
+            // buy ticket
+            await USDT.connect(user3).approve(raffleFi.address, ticketPriceUSDT)
+            await expect(raffleFi.connect(user3).buyRaffleTicket(3, 1, merkleTreeData.proof))
+            .to.be.revertedWithCustomError(raffleFi, "UserNotWhitelisted")
+        })
     })
 
     describe("Refund", () => {
@@ -617,13 +729,13 @@ describe("RaffleFi", function () {
             await expect(raffleFi.connect(user3).claimCancelledRaffle(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))
             .to.be.revertedWithCustomError(raffleFi, "NotTicketOwner")
         })
+        it("should not refund if the raffle was completed", async () => {})
     })
 
     describe("Complete", () => {
         const ticketPriceUSDT = utils.parseUnits("1", 18)
         const ticketPriceUSDC = utils.parseUnits("1", 6)
         beforeEach(async () => {
-            
             // raffle 1 ERC721
             await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
             await erc721_1.connect(user1).approve(raffleFi.address, 1)
@@ -631,7 +743,7 @@ describe("RaffleFi", function () {
                 erc721_1.address,
                 1,
                 USDT.address,
-                new Date().valueOf() + 10000,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
                 10,
                 ticketPriceUSDT,
                 constants.HashZero
@@ -644,7 +756,7 @@ describe("RaffleFi", function () {
                 USDT.address,
                 utils.parseUnits("1", 18),
                 USDC.address,
-                new Date().valueOf() + 10000,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
                 10,
                 ticketPriceUSDC,
                 constants.HashZero
@@ -655,25 +767,295 @@ describe("RaffleFi", function () {
             await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
 
             // buy tickets for ERC20 raffle
-            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
-            await raffleFi.connect(user2).buyRaffleTicket(2, 10, [])
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
+        })
+        it("should allow to complete an ERC721 raffle with all tickets sold (set state to FINISHED)", async () => {
+            await raffleFi.connect(user1).completeRaffle(1, true)
+            const raffle = await raffleFi.getRaffleDetails(1)
+            expect(raffle.raffleState).to.be.eq(1) // FINISHED
+            expect(raffle.ticketsSold).to.be.eq(10)
+        })
+        it("should allow to complete an ERC20 raffle with all tickets sold (set state to FINISHED)", async () => {
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
+            await raffleFi.connect(user1).completeRaffle(2, true)
+            const raffle = await raffleFi.getRaffleDetails(2)
+            expect(raffle.raffleState).to.be.eq(1) // FINISHED
+            expect(raffle.ticketsSold).to.be.eq(10)
+        })
+        it("should decrease the LINK balance of the contract", async () => {
+            const balanceBefore = await LINKContract.balanceOf(raffleFi.address)
+            await raffleFi.connect(user1).completeRaffle(1, true)
+            const balanceAfter = await LINKContract.balanceOf(raffleFi.address)
+            expect(balanceBefore).to.be.gt(balanceAfter)
+        })
+        it("should successfully store a chailink VRF request id", async () => {
+            const tx = await raffleFi.connect(user1).completeRaffle(1, true)
+            const receipt = await tx.wait()
+            const requestId = receipt.events[4].args[0].toString()
+            
+            const raffleId = await raffleFi.vrfRequestToRaffleID(requestId)
+            expect(raffleId.toString()).to.be.eq('1')
+           
+        })
+        it("should not allow to complete someone else's raffle", async () => {
+            await expect(raffleFi.connect(user2).completeRaffle(1, true))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourRaffle")
+        })
+        it("should allow to complete a raffle with less tickets sold than expected if creator agrees", async () => {
+            // move in time
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, true)
+            const raffle = await raffleFi.getRaffleDetails(2)
+            expect(raffle.raffleState).to.be.eq(1) // FINISHED
+        })
+        it("should set the raffle to REFUNDED if the creator does not agree to complete with less tickets sold than expected", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, false)
+            const raffle = await raffleFi.getRaffleDetails(2)
+            expect(raffle.raffleState).to.be.eq(3) // REFUNDED
+        })
+        it("should send the NFT back to the raffle creator if the raffle doet not complete (erc721 raffle)", async () => {
+            // create another raffle
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+            expect(await erc721_1.ownerOf(2)).to.be.eq(raffleFi.address)
+            // don't buy any tickets
+            // send forward time
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(3, false) 
+            const raffle = await raffleFi.getRaffleDetails(3)
+            expect(raffle.raffleState).to.be.eq(3) // REFUNDED
+            expect(await erc721_1.ownerOf(2)).to.be.eq(user1Address)
+        })
+        it("should send the tokens back to the raffle creator if the raffle doet not complete (erc20 raffle)", async () => {
+            const balanceBefore = await USDT.balanceOf(user1Address)
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, false) 
+            const raffle = await raffleFi.getRaffleDetails(2) 
+            expect(raffle.raffleState).to.be.eq(3) // REFUNDED
+            const balanceAfter = await USDT.balanceOf(user1Address)
+            expect(balanceBefore.add(utils.parseEther("1"))).to.be.eq(balanceAfter)
+        })
+        it("should refund the ether for a erc20 raffle with ether as currency and not enough tickets sold + creator not agreeing to complete", async () => {
+            // create another raffle
+            const ticketPriceUSDT = utils.parseUnits("0.1", 18)
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await raffleFi.createERC20Raffle(
+                constants.AddressZero,
+                utils.parseEther("1"),
+                USDT.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero,
+                {
+                    value: utils.parseEther("1")
+                }
+            )
+            // buy 1 ticket
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.connect(user2).buyRaffleTicket(3, 1, [])
+            // send forward time
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            // balance ether before
+            const balanceBefore = await ethers.provider.getBalance(user1Address)
+            // complete raffle
+            await raffleFi.connect(user1).completeRaffle(3, false) 
+            const raffle = await raffleFi.getRaffleDetails(3)
+            expect(raffle.raffleState).to.be.eq(3) // REFUNDED
+            // check ether balance
+            const balanceAfter = await ethers.provider.getBalance(user1Address)
+            expect(balanceAfter).to.be.gt(balanceBefore)
 
         })
-        it("should allow to complete an ERC721 raffle", async () => {
+        it("(bad receiver reverting on receive) should refund the ether as WETH for a erc20 raffle with ether as currency and not enough tickets sold + creator not agreeing to complete", async () => {
+            // create another raffle
+            const wethBalanceBefore = await WETH.balanceOf(badReceiver.address)
+            expect(wethBalanceBefore).to.be.eq(0)
+            await badReceiver.createERC20Raffle(
+                constants.AddressZero,
+                utils.parseEther("1"),
+                USDT.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                utils.parseUnits("1", 18),
+                constants.HashZero,
+                {
+                    value: utils.parseEther("1")
+                }
+            )
 
+            // travel in time     
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await badReceiver.connect(user1).completeRaffle(3, false)
+            const wethBalance = await WETH.balanceOf(badReceiver.address)
+            expect(wethBalance).to.be.eq(utils.parseUnits("1", 18))
+            
+            const raffle = await raffleFi.getRaffleDetails(3)
+            expect(raffle.raffleState).to.be.eq(3) // REFUNDED
         })
-        it("should allow to complete an ERC20 raffle", async () => {})
-        it("should not allow to complete an ERC721 raffle if not all tickets were sold or deadline passed", async () => {})
-        it("should not allow to complete an ERC20 raffle if not all tickets were sold or deadline passed", async () => {})
-        it("should emit an event when completing a raffle", async () => {})
+        it("should not allow to complete an ERC721 raffle if not all tickets were sold or deadline passed", async () => {
+            // create another erc721 raffle
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 2)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                2,
+                USDT.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+            await expect(raffleFi.connect(user1).completeRaffle(3, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotEnded")
+        })
+        it("should not allow to complete an ERC20 raffle if not all tickets were sold or deadline passed", async () => {
+            await expect(raffleFi.connect(user1).completeRaffle(2, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotEnded")
+        })
+        it("should emit an event when completing a raffle", async () => {
+            expect(await raffleFi.connect(user1).completeRaffle(1, true))
+            .to.emit(raffleFi, "RaffleStateChanged").withArgs(
+                BigNumber.from(0), // IN_PROGRESS
+                BigNumber.from(1) // FINISHED
+            )
+            .to.emit(raffleFi, "VRFRequest")   
+        })
+        it("should not complete a raffle that is cancelled", async () => {
+            await raffleFi.connect(user1).cancelRaffle(1)
+            await expect(raffleFi.connect(user1).completeRaffle(1, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should not allow to complete a raffle that is already completed", async () => {
+            expect(await raffleFi.connect(user1).completeRaffle(1, true))
+            .to.emit(raffleFi, "RaffleStateChanged").withArgs(
+                BigNumber.from(0), // IN_PROGRESS
+                BigNumber.from(1) // FINISHED
+            )
+            .to.emit(raffleFi, "VRFRequest") 
+            await expect(raffleFi.connect(user1).completeRaffle(1, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should not allow to complete a raffle that is refunded", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, false)
+            await expect(raffleFi.connect(user1).completeRaffle(2, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        /// can only be tested in live network 
+        it("should have awarded a user after completing", async () => {
+            if (network.config.chainId !== 5) { return }
+            expect(await raffleFi.connect(user1).completeRaffle(1, true))
+            .to.emit(raffleFi, "RaffleStateChanged").withArgs(
+                BigNumber.from(0), // IN_PROGRESS
+                BigNumber.from(1) // FINISHED
+            )
+            .to.emit(raffleFi, "VRFRequest")   
+            const raffle = await raffleFi.getRaffleDetails(1)
+            expect(raffle.raffleWinner).to.be.eq(user2Address) // only one that bought tickets
+        })
+        it("should allow a user to get a refund after the raffle was completed but did not sell out", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, false)
+            
+            const balanceBefore = await USDC.balanceOf(user2Address)
+            await raffleFi.connect(user2).claimCancelledRaffle(2, [
+                0, 1, 2, 3, 4
+            ])
+            const balanceAfter = await USDC.balanceOf(user2Address)
+            expect(balanceAfter.sub(balanceBefore)).to.be.eq(ticketPriceUSDC.mul(5))
+        })
+        it("should not give a refund for other people's tickets even after completing a raffle that goes into refunded state", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await raffleFi.connect(user1).completeRaffle(2, false)
+            
+            const balanceBefore = await USDC.balanceOf(user2Address)
+            await expect(raffleFi.connect(user2).claimCancelledRaffle(2, [
+                0, 1, 2, 3, 4, 5
+            ])).to.be.revertedWithCustomError(raffleFi, "NotTicketOwner")
+        })
     })
 
+    // only to be tested on goerli 
     describe("Claim", () => {
-        it("should allow the winner to claim the prize for an ERC721 raffle", async () => {})
-        it("should allow the winner to claim the prize for an ERC20 raffle", async () => {})
-        it("should prevent users from claiming the prize if the raffle is not completed", async () => {})
-        it("should prevent users from claiming the prize if they are not the winner", async () => {})
-        it("should emit an event when claiming the prize", async () => {})
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        beforeEach(async () => {
+            // raffle 1 ERC721
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
+            await USDT.connect(user1).approve(raffleFi.address, utils.parseUnits("1", 18))
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
+                10,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+
+            // buy tickets for ERC721 raffle
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
+
+            // buy tickets for ERC20 raffle
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
+        })
+        it("should allow the winner to claim the prize for an ERC721 raffle", async () => {
+            if (network.config.chainId !== 5) { return }
+        })
+        it("should allow the winner to claim the prize for an ERC20 raffle", async () => {
+            if (network.config.chainId !== 5) { return }
+        })
+        it("should prevent users from claiming the prize if the raffle is not completed", async () => {
+            await expect(raffleFi.connect(user1).claimRaffle(1))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotCompleted")
+        })
+        it("should prevent to claim a non existent raffle", async () => {
+            await expect(raffleFi.connect(user1).claimRaffle(3))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleDoesNotExist")
+        })
+        it("should prevent users from claiming the prize if they are not the winner", async () => {
+            if (network.config.chainId !== 5) { return }
+        })
+        it("should emit an event when claiming the prize", async () => {
+            if (network.config.chainId !== 5) { return }
+        })
     })
 
     describe("View", () => {
@@ -682,13 +1064,13 @@ describe("RaffleFi", function () {
         const numOfTickets = 10
         beforeEach(async () => {
             // raffle 1 ERC721
-            await LINKContract.approve(raffleFi.address, LINK_FEE)
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
             await erc721_1.connect(user1).approve(raffleFi.address, 1)
             await raffleFi.createERC721Raffle(
                 erc721_1.address,
                 1,
                 USDT.address,
-                new Date().valueOf() + 10000,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
                 numOfTickets,
                 ticketPriceUSDT,
                 constants.HashZero
@@ -699,13 +1081,13 @@ describe("RaffleFi", function () {
             await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
 
             // raffle 2 ERC20
-            await LINKContract.approve(raffleFi.address, LINK_FEE)
+            await LINKContract.connect(user1).approve(raffleFi.address, LINK_FEE)
             await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT)
             await raffleFi.createERC20Raffle(
                 USDT.address,
                 utils.parseUnits("1", 18),
                 USDC.address,
-                new Date().valueOf() + 10000,
+                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
                 numOfTickets,
                 ticketPriceUSDC,
                 constants.HashZero
@@ -748,3 +1130,4 @@ describe("RaffleFi", function () {
         })
     })
 });
+

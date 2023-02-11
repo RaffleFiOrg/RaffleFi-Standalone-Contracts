@@ -56,7 +56,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     mapping(uint256 => mapping(uint256 => address)) public raffleTickets;
 
     /// @notice ChainlinkRequest => raffleID
-    mapping(uint256 => uint256) private vrfRequestToRaffleID;
+    mapping(uint256 => uint256) public vrfRequestToRaffleID;
 
     /// @notice Number of raffles created so far
     uint256 public raffleCounter;
@@ -379,10 +379,13 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
                     );
                 }
                 if (raffleData.raffleType == RaffleType.ERC20) {
-                    ERC20(raffleData.currency).safeTransfer(
+                    if (raffleData.assetContract == address(0)) _handleNativeTransfer(raffleData.raffleOwner, raffleData.nftIdOrAmount);
+                    else {
+                        ERC20(raffleData.assetContract).safeTransfer(
                         raffleData.raffleOwner, 
                         raffleData.nftIdOrAmount
-                    );
+                        );
+                    }
                 }
                 // set state to refunded
                 raffles[_raffleId].raffleState = RaffleState.REFUNDED;
@@ -421,14 +424,16 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         if (raffleData.raffleType == RaffleType.ERC721){
             IERC721(raffleData.assetContract).transferFrom(address(this), winner, raffleData.nftIdOrAmount);
         } else if (raffleData.raffleType == RaffleType.ERC20){
-            ERC20(raffleData.currency).safeTransfer(winner, raffleData.nftIdOrAmount);
+            if (raffleData.assetContract == address(0)) _handleNativeTransfer(winner, raffleData.nftIdOrAmount);
+            else ERC20(raffleData.assetContract).safeTransfer(winner, raffleData.nftIdOrAmount);
         }
 
         uint256 totalAmountEarned = raffleData.ticketsSold * raffleData.pricePerTicket;
         address raffleCurrency = raffleData.currency;
 
         // Payments to the raffle owner
-        ERC20(raffleCurrency).safeTransfer(raffleOwner, totalAmountEarned);
+        if (raffleCurrency == address(0)) _handleNativeTransfer(raffleOwner, totalAmountEarned);
+        else ERC20(raffleCurrency).safeTransfer(raffleOwner, totalAmountEarned);
     }
 
 
@@ -463,6 +468,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @param _raffleId <uint256> The ID of the raffle
     /// @return requestId <uint256> The ID of the VRF request
     function _requestRandomness(uint256 _raffleId) internal returns (uint256 requestId) {
+        uint256 price = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
+        if (price > LINK.balanceOf(address(this))) revert NotEnoughTokens();
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
@@ -481,7 +488,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords) internal override {
         uint256 raffleId = vrfRequestToRaffleID[_requestId];
         RaffleData storage raffleData = raffles[raffleId];
-        /// should not happen but what if VRF calls back twice?
+        /// should not happen but what if VRF calls back twice? this next check will prevent
         if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
         raffleData.raffleState = RaffleState.COMPLETED;
         emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
