@@ -2,7 +2,9 @@
   "author": "ctrlc03 && unt4x3d",
   "scripts": {
     "test": "npx hardhat test test/* --network hardhat",
-    "test:live": "npx hardhat test test/* --network goerli"
+    "test:live": "npx hardhat test test/* --network goerli",
+    "deploy:goerli": "npx hardhat run scripts/deploy.ts --network goerli",
+    "deploy:test": "npx hardhat run scripts/deploy.ts"
   },
   "devDependencies": {
     "@chainlink/contracts": "^0.6.1",
