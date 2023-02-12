@@ -1,10 +1,11 @@
 {
   "author": "ctrlc03 && unt4x3d",
   "scripts": {
-    "test": "npx hardhat test test/* --network hardhat",
-    "test:live": "npx hardhat test test/* --network goerli",
+    "test": "npx hardhat test test/rafflefi.ts --network hardhat",
+    "test:live": "npx hardhat test test/rafflefi.live.ts --network goerli",
     "deploy:goerli": "npx hardhat run scripts/deploy.ts --network goerli",
-    "deploy:test": "npx hardhat run scripts/deploy.ts"
+    "deploy:test": "npx hardhat run scripts/deploy.ts",
+    "merkle:generate": "npx ts-node scripts/genMerkleTree.ts"
   },
   "devDependencies": {
     "@chainlink/contracts": "^0.6.1",

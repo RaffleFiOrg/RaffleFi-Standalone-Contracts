@@ -1,6 +1,27 @@
 # RaffleFi
 
+```
+ ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
+▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
+▓██ ░▄█ ▒▒██  ▀█▄  ▒████ ░▒████ ░▒██░    ▒███   ▒████ ░▒██▒
+▒██▀▀█▄  ░██▄▄▄▄██ ░▓█▒  ░░▓█▒  ░▒██░    ▒▓█  ▄ ░▓█▒  ░░██░
+░██▓ ▒██▒ ▓█   ▓██▒░▒█░   ░▒█░   ░██████▒░▒████▒░▒█░   ░██░
+░ ▒▓ ░▒▓░ ▒▒   ▓▒█░ ▒ ░    ▒ ░   ░ ▒░▓  ░░░ ▒░ ░ ▒ ░   ░▓  
+  ░▒ ░ ▒░  ▒   ▒▒ ░ ░      ░     ░ ░ ▒  ░ ░ ░  ░ ░      ▒ ░
+  ░░   ░   ░   ▒    ░ ░    ░ ░     ░ ░      ░    ░ ░    ▒ ░
+   ░           ░  ░                  ░  ░   ░  ░        ░  
+```
+
 RaffleFi is a protocol that can be used to create on chain raffles. 
+
+A seller can decide on their raffle options such as:
+
+* ERC721 or ERC20/Ether/Native asset to raffle (address and quantity/tokenID)
+* number of tickets to sell
+* price of the ticket
+* duration of the raffle (> 1 hour)
+* Merkle root (whitelisted raffle)
+* 
 
 ## Installation
 
@@ -31,6 +52,15 @@ To run tests in Goerli (to check whether raffles complete with a winner) you can
 
 For ease of configuration, live tests have been added in a different file. Make sure the accounts you are using have LINK tokens ([faucet here](https://faucets.chain.link/)) and Ether to pay for tx fees ([faucet here](https://goerlifaucet.com/))
 
+You can provide addresses of ERC721 tokens, ERC20 tokens and a deployed instance of RaffleFi so that you do not have to deploy every time you run the tests. These are the extra .env variables to add:
+
+```bash
+ERC20_1=
+ERC20_2=
+ERC721_1=
+RAFFLEFI_TESTNET=
+```
+
 ## Deploy
 
 To deploy, please fill the `.env` file -> `cp .env-template .env`:
@@ -48,6 +78,32 @@ LINK_FEE="250000000000000000"
 ```
 
 You can deploy your own version using `yarn deploy:$network_name` for instance (for now) you can deploy to goerli using `yarn deploy:goerli`. To test deployment locally you can use `yarn deploy:test`.
+
+## Utilities
+
+If you want to create a whitelisted raffle, you can add the whitelisted addresses in a file named `addresses.txt` within the scripts folder. Then you can run `yarn merkle:generate` to generate proofs and merkle root. These will be saved in `scripts/whitelist.json`
+
+```bash
+yarn merkle:generate
+yarn run 
+$ npx ts-node scripts/genMerkleTree.ts
+
+    ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
+    ▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
+    ▓██ ░▄█ ▒▒██  ▀█▄  ▒████ ░▒████ ░▒██░    ▒███   ▒████ ░▒██▒
+    ▒██▀▀█▄  ░██▄▄▄▄██ ░▓█▒  ░░▓█▒  ░▒██░    ▒▓█  ▄ ░▓█▒  ░░██░
+    ░██▓ ▒██▒ ▓█   ▓██▒░▒█░   ░▒█░   ░██████▒░▒████▒░▒█░   ░██░
+    ░ ▒▓ ░▒▓░ ▒▒   ▓▒█░ ▒ ░    ▒ ░   ░ ▒░▓  ░░░ ▒░ ░ ▒ ░   ░▓
+      ░▒ ░ ▒░  ▒   ▒▒ ░ ░      ░     ░ ░ ▒  ░ ░ ░  ░ ░      ▒ ░
+      ░░   ░   ░   ▒    ░ ░    ░ ░     ░ ░      ░    ░ ░    ▒ ░
+       ░           ░  ░                  ░  ░   ░  ░        ░
+
+[*] Generating merkle tree...
+[+] The Merkle root is 0x134bdea533b523f6f44fedf351ebd32a7c52b53bfed077c944cc6b48a594b4b6
+[*] Writing the whitelist data to whitelist.json
+[+] Done!
+✨  Done in 1.17s.
+```
 
 ## Safety
 

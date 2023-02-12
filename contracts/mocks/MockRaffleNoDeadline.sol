@@ -5,25 +5,13 @@ import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {MerkleProofLib} from "solmate/src/utils/MerkleProofLib.sol";
 import {VRFV2WrapperConsumerBase} from "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {IERC721} from "./interfaces/IERC721.sol";
-import {IWETH} from "./interfaces/IWETH9.sol";
-
-/*
- ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
-▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
-▓██ ░▄█ ▒▒██  ▀█▄  ▒████ ░▒████ ░▒██░    ▒███   ▒████ ░▒██▒
-▒██▀▀█▄  ░██▄▄▄▄██ ░▓█▒  ░░▓█▒  ░▒██░    ▒▓█  ▄ ░▓█▒  ░░██░
-░██▓ ▒██▒ ▓█   ▓██▒░▒█░   ░▒█░   ░██████▒░▒████▒░▒█░   ░██░
-░ ▒▓ ░▒▓░ ▒▒   ▓▒█░ ▒ ░    ▒ ░   ░ ▒░▓  ░░░ ▒░ ░ ▒ ░   ░▓  
-  ░▒ ░ ▒░  ▒   ▒▒ ░ ░      ░     ░ ░ ▒  ░ ░ ░  ░ ░      ▒ ░
-  ░░   ░   ░   ▒    ░ ░    ░ ░     ░ ░      ░    ░ ░    ▒ ░
-   ░           ░  ░                  ░  ░   ░  ░        ░  
-*/
+import {IERC721} from "../interfaces/IERC721.sol";
+import {IWETH} from "../interfaces/IWETH9.sol";
 
 /// @title RaffleFi
 /// @author unt4x3d && ctrlc03
 /// @notice RaffleFi main contract
-contract RaffleFi is VRFV2WrapperConsumerBase {
+contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     using SafeTransferLib for ERC20;
 
     enum RaffleState {
@@ -173,8 +161,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external returns (uint256 _raffleId) {
-        // the raffle must last at least 1 hour
-        if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
         // the creator must own the NFT
         if (IERC721(assetContract).ownerOf(nftIdOrAmount) != msg.sender) revert NotYourAsset();
         // at least 2 tickets
@@ -228,8 +214,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external payable returns (uint256 _raffleId) {
-        // raffle must last at least 1 hour
-        if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
         // if creating a raffle using Ether as the asset raffled
         if (assetContract == address(0)) {
             // we need to check that msg.value == nftIdOrAmount

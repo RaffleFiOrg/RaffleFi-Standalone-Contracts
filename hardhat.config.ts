@@ -42,6 +42,9 @@ const config: HardhatUserConfig = {
     artifacts: "build/contracts",
     tests: "tests",
   },
+  mocha: {
+    timeout: 100000000000000
+  },
   solidity: {
     version: "0.8.17",
     settings: {
@@ -52,9 +55,7 @@ const config: HardhatUserConfig = {
           yul: true
         }
       },
-    },
-  
-   
+    }, 
   },
 };
 
