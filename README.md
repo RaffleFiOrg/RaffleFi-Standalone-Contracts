@@ -21,7 +21,13 @@ A seller can decide on their raffle options such as:
 * price of the ticket
 * duration of the raffle (> 1 hour)
 * Merkle root (whitelisted raffle)
-* 
+* currency for ticket payment
+
+Buyers can buy tickets up until the deadline of the raffle, or until tickets are sold out. The seller can cancel the raffle at any time to regain control of their assets (whether this is a ERC20/Ether or an ERC721 token). Buyers will be able to claim a refund on their tickets. Unfortunately gas fees will be lost. 
+
+NOTE: if tickets are not sold out, a seller can decide to go ahead with a raffle anyways.
+
+NOTE (2): use at discretion. You will lose gas fees if a seller decides to cancel a raffle. 
 
 ## Installation
 
