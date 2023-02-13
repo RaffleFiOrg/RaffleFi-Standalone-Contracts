@@ -20,7 +20,7 @@ A seller can decide on their raffle options such as:
 * number of tickets to sell
 * price of the ticket
 * duration of the raffle (> 1 hour)
-* Merkle root (whitelisted raffle)
+* Merkle root - used to create private raffles
 * currency for ticket payment
 
 Buyers can buy tickets up until the deadline of the raffle, or until tickets are sold out. The seller can cancel the raffle at any time to regain control of their assets (whether this is a ERC20/Ether or an ERC721 token). Buyers will be able to claim a refund on their tickets. Unfortunately gas fees will be lost. 
@@ -80,21 +80,20 @@ GOERLI_LINK_WHALE="0x4a3df8cae46765d33c2551ff5438a5c5fc44347c"
 WETH_ADDR="0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6"
 VRF_CALLBACK_GAS="100000"
 VRF_RETRIES="3"
-LINK_FEE="250000000000000000"
 ```
 
 You can deploy your own version using `yarn deploy:$network_name` for instance (for now) you can deploy to goerli using `yarn deploy:goerli`. To test deployment locally you can use `yarn deploy:test`.
 
 ## Utilities
 
-If you want to create a whitelisted raffle, you can add the whitelisted addresses in a file named `addresses.txt` within the scripts folder. Then you can run `yarn merkle:generate` to generate proofs and merkle root. These will be saved in `scripts/whitelist.json`
+If you want to create a private raffle, you can add the allowed addresses in a file named `addresses.txt` within the scripts folder. Then you can run `yarn merkle:generate` to generate proofs and merkle root. These will be saved in `scripts/allowlist.json`
 
 ```bash
 yarn merkle:generate
 yarn run 
 $ npx ts-node scripts/genMerkleTree.ts
 
-    ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
+     ██▀███   ▄▄▄       █████▒  █████▒██▓    ▓█████   █████▒██▓
     ▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
     ▓██ ░▄█ ▒▒██  ▀█▄  ▒████ ░▒████ ░▒██░    ▒███   ▒████ ░▒██▒
     ▒██▀▀█▄  ░██▄▄▄▄██ ░▓█▒  ░░▓█▒  ░▒██░    ▒▓█  ▄ ░▓█▒  ░░██░
@@ -106,7 +105,7 @@ $ npx ts-node scripts/genMerkleTree.ts
 
 [*] Generating merkle tree...
 [+] The Merkle root is 0x134bdea533b523f6f44fedf351ebd32a7c52b53bfed077c944cc6b48a594b4b6
-[*] Writing the whitelist data to whitelist.json
+[*] Writing the allow list data to allowlist.json
 [+] Done!
 ✨  Done in 1.17s.
 ```

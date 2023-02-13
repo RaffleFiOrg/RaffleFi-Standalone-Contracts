@@ -6,13 +6,11 @@ const deploy = async () => {
         !process.env.GOERLI_VRF_WRAPPER || 
         !process.env.WETH_ADDR || 
         !process.env.VRF_CALLBACK_GAS ||
-        !process.env.VRF_RETRIES ||
-        !process.env.LINK_FEE
+        !process.env.VRF_RETRIES
     ) {
         throw new Error("Missing config")
     }
     
-    const LINK_FEE = process.env.LINK_FEE
     const LINK_ADDR = process.env.GOERLI_LINK
     const VRF_WRAPPER_ADDR = process.env.GOERLI_VRF_WRAPPER
     const WETH = process.env.WETH_ADDR
@@ -29,7 +27,6 @@ const deploy = async () => {
         1, // 1 random number needed only
         CALLBACK_GAS_LIMIT,
         VRF_RETRIES,
-        LINK_FEE
     )
 
     await raffleFi.deployed()

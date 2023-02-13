@@ -36,12 +36,10 @@ contract MockBadRaffleCreator {
 
     IRaffleFi public immutable raffleFi;
     IERC20 public immutable link;
-    uint256 public immutable linkFee;
 
-    constructor(address _raffleFi, address _link, uint256 _linkFee) payable {
+    constructor(address _raffleFi, address _link) payable {
         raffleFi = IRaffleFi(_raffleFi);
         link = IERC20(_link);
-        linkFee = _linkFee;
     }
 
     function createRaffle(
@@ -53,7 +51,6 @@ contract MockBadRaffleCreator {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external {
-        link.approve(address(raffleFi), linkFee);
         IERC721(assetContract).approve(address(raffleFi), nftIdOrAmount);
         raffleFi.createERC721Raffle(
             assetContract,
@@ -75,7 +72,6 @@ contract MockBadRaffleCreator {
         uint256 pricePerTicket,
         bytes32 MerkleRoot
     ) external payable {
-        link.approve(address(raffleFi), linkFee);
         raffleFi.createERC20Raffle{value: msg.value}(
             assetContract,
             nftIdOrAmount,
@@ -92,6 +88,7 @@ contract MockBadRaffleCreator {
     }
 
     function completeRaffle(uint256 raffleId, bool accept) external {
+        link.approve(address(raffleFi), type(uint256).max);
         raffleFi.completeRaffle(raffleId, accept);
     }
     

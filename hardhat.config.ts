@@ -3,7 +3,8 @@ import { HardhatUserConfig } from "hardhat/types";
 import "@nomiclabs/hardhat-ethers";
 import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-network-helpers";
-import 'solidity-coverage';
+import "solidity-coverage";
+import "hardhat-gas-reporter";
 import { ethers } from "ethers";
 
 dotenv.config();
@@ -57,6 +58,11 @@ const config: HardhatUserConfig = {
       },
     }, 
   },
+  gasReporter: {
+    enabled: true,
+    currency: 'USD',
+    
+  }
 };
 
 

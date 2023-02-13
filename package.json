@@ -5,7 +5,8 @@
     "test:live": "npx hardhat test test/rafflefi.live.ts --network goerli",
     "deploy:goerli": "npx hardhat run scripts/deploy.ts --network goerli",
     "deploy:test": "npx hardhat run scripts/deploy.ts",
-    "merkle:generate": "npx ts-node scripts/genMerkleTree.ts"
+    "merkle:generate": "npx ts-node scripts/genMerkleTree.ts",
+    "coverage": "npx hardhat coverage --network hardhat --testfiles test/rafflefi.ts"
   },
   "devDependencies": {
     "@chainlink/contracts": "^0.6.1",
@@ -24,8 +25,9 @@
     "chai": "^4.2.0",
     "dotenv": "^16.0.3",
     "ethers": "^5.4.7",
+    "ganache-cli": "^6.12.2",
     "hardhat": "^2.12.6",
-    "hardhat-gas-reporter": "^1.0.8",
+    "hardhat-gas-reporter": "^1.0.9",
     "keccak256": "^1.0.6",
     "merkletreejs": "^0.3.9",
     "solidity-coverage": "^0.8.0",

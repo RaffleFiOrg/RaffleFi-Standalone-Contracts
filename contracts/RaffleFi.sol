@@ -87,8 +87,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     uint16 public constant MINIMUM_RAFFLE_DURATION = 1 hours;
     /// @notice callback gas limit for VRF request
     uint32 public immutable callbackGasLimit;
-    /// @notice LINK Fee for VRF request
-    uint64 public immutable linkFee;
 
     /// @notice custom errors 
     error NotYourRaffle();
@@ -138,21 +136,18 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @param _numOfWords <uint8> Number of random numbers per request
     /// @param _callbackGasLimit <uint32> Callback gas limit for VRF request
     /// @param _requestConfirmations <uint8> Number of confirmations for VRF request
-    /// @param _linkFee <uint64> LINK Fee for VRF request
     constructor(
         address _weth,
         address _link,
         address _wrapper,
         uint8 _numOfWords,
         uint32 _callbackGasLimit,
-        uint8 _requestConfirmations,
-        uint64 _linkFee
+        uint8 _requestConfirmations
     ) payable VRFV2WrapperConsumerBase(_link, _wrapper) {
         WETH = IWETH(_weth);
         numberOfWords = _numOfWords;
         callbackGasLimit = _callbackGasLimit;
         requestConfirmations = _requestConfirmations;
-        linkFee = _linkFee;
     }
 
     /// @notice Create a new ERC721 raffle
@@ -199,9 +194,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
             });
 
             emit NewRaffleCreated(_raffleId);
-
-            // take LINK Fee 
-            _takeLINKFee();
 
             // transfer NFT 
             IERC721(assetContract).transferFrom(msg.sender, address(this), nftIdOrAmount);
@@ -261,9 +253,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
             emit NewRaffleCreated(_raffleId);
         }   
 
-        // take LINK Fee
-        _takeLINKFee();
-        
         // take money if not ether 
         if (assetContract != address(0)) {
             /// @notice here we make sure deflationary tokens are not accepted
@@ -300,9 +289,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
             if (raffleData.assetContract == address(0)) _handleNativeTransfer(raffleData.raffleOwner, raffleData.nftIdOrAmount);
             else ERC20(raffleData.assetContract).safeTransfer(raffleData.raffleOwner, raffleData.nftIdOrAmount);
         }
-
-        // refund LINK
-        LINK.transfer(raffleData.raffleOwner, linkFee);
 
         emit RaffleCancelled(_raffleId);
     }
@@ -480,8 +466,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @param _raffleId <uint256> The ID of the raffle
     /// @return requestId <uint256> The ID of the VRF request
     function _requestRandomness(uint256 _raffleId) internal returns (uint256 requestId) {
-        uint256 price = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
-        if (price > LINK.balanceOf(address(this))) revert NotEnoughTokens();
+        // take LINK fee
+        _takeLINKFee();
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
@@ -547,6 +533,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @notice collects the LINK fee for the random number needed 
     /// @notice for the raffle
     function _takeLINKFee() private {
+        // calculate fee 
+        uint256 linkFee = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
         // we need to take the payment for the LINK fee
         uint256 linkBalanceBefore = LINK.balanceOf(address(this));
         LINK.transferFrom(msg.sender, address(this), linkFee);

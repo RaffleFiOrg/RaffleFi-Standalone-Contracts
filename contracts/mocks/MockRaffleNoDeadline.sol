@@ -464,16 +464,17 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     /// @param _raffleId <uint256> The ID of the raffle
     /// @return requestId <uint256> The ID of the VRF request
     function _requestRandomness(uint256 _raffleId) internal returns (uint256 requestId) {
-        uint256 price = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
-        if (price > LINK.balanceOf(address(this))) revert NotEnoughTokens();
+        // uint256 price = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
+        // if (price > LINK.balanceOf(address(this))) revert NotEnoughTokens();
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
-        requestId = requestRandomness(
-            callbackGasLimit,
-            requestConfirmations,
-            numberOfWords
-        );
+        // requestId = requestRandomness(
+        //     callbackGasLimit,
+        //     requestConfirmations,
+        //     numberOfWords
+        // );
+        requestId = 5;
     }
 
     /// @notice Callback function used by VRF Coordinator
