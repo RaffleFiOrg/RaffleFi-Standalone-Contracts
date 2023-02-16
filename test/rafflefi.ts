@@ -31,7 +31,7 @@ describe("RaffleFi", function () {
     let FeeOnTransferToken: Contract
     let USDC: Contract
     let erc721_1: Contract
-    let erc721_2: Contract
+    let erc721_2: Contract 
     let badReceiver: Contract
     let LINKContract: Contract 
 
@@ -48,7 +48,6 @@ describe("RaffleFi", function () {
     const LINK_ADDR = process.env.GOERLI_LINK!
     const VRF_WRAPPER_ADDR = process.env.GOERLI_VRF_WRAPPER!
     const LINK_WHALE = process.env.GOERLI_LINK_WHALE!
-
 
     beforeEach(async () => {
         [user1, user2, user3] = await ethers.getSigners()
@@ -545,8 +544,6 @@ describe("RaffleFi", function () {
             await raffleFi.connect(user2).buyRaffleTicket(2, 10, [])
             await expect(raffleFi.buyRaffleTicket(2, 1, []))
             .to.be.revertedWithCustomError(raffleFi, "TicketsSoldOut")
-        })
-        it("should allow to buy a ticket for a whitelisted raffle", async () => {
         })
         it("should emit an event when buying a ticket", async () => {
             await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT)
@@ -1149,6 +1146,313 @@ describe("RaffleFi", function () {
         })
     })
 
+    describe("createTicketSellOrder", () => {
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        beforeEach(async () =>  {
+            // raffle 1 ERC721
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+
+            // buy tickets on raffle one
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 5, []) // tickets 0-4
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT.mul(5))
+            await raffleFi.connect(user1).buyRaffleTicket(1, 5, []) // tickets 5-9
+
+            // buy tickets on raffle 2 
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, []) // tickets 0-4
+            // cancel the raffle 2
+            await raffleFi.cancelRaffle(2)
+        })
+        it("should revert if the raffle is not in progress", async () => {
+            await expect(raffleFi.connect(user2).createTicketSellOrder(2, 0, constants.AddressZero, utils.parseEther("1")))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should revert if the raffle does not exist", async () => {
+            /// this will revert with NotYourTicket because the ticket for a non existent raffle 
+            /// will be assigned to the zero address
+            await expect(raffleFi.connect(user2).createTicketSellOrder(3, 0, constants.AddressZero, utils.parseEther("1")))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicket")
+        })
+        it("should revert is the ticket is not owned by the caller", async () => {
+            const raffleId = 1 
+            const ticketId = 0
+            expect(await raffleFi.getTicketOwner(raffleId, ticketId)).to.be.eq(user2Address) // prove that the ticket is owned by user2
+            await expect(raffleFi.connect(user1).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("1")))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicket")
+        })
+        it("should create a new sell order", async () => {
+            const raffleId = 1 
+            const ticketId = 0
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("1"))
+            const order = await raffleFi.ticketsOrders(raffleId, ticketId)
+            expect(order.owner).to.be.eq(user2Address)
+            expect(order.currency).to.be.eq(constants.AddressZero)
+            expect(order.price).to.be.eq(utils.parseEther("1"))
+        })
+        it("should emit an event when successfully creating a sell order", async () => {
+            const raffleId = 1 
+            const ticketId = 0
+            expect(await raffleFi.connect(user2).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("1")))
+            .to.emit(raffleFi, "TicketSellOrderCreated")
+            .withArgs(raffleId, ticketId, user2Address, constants.AddressZero, utils.parseEther("1"))
+        })
+    })
+
+    describe("cancelTicketSellOrder", () => {
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        beforeEach(async () =>  {
+            // raffle 1 ERC721
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+
+            // buy tickets on raffle one
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 5, []) // tickets 0-4
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT.mul(5))
+            await raffleFi.connect(user1).buyRaffleTicket(1, 5, []) // tickets 5-9
+
+            // buy tickets on raffle 2 
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, []) // tickets 0-4
+            // cancel the raffle 2
+            await raffleFi.cancelRaffle(2)
+
+            // create a sell order for ticket 0 on raffle 1
+            const raffleId = 1 
+            const ticketId = 0
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("1"))
+        })
+        it("should not cancel someone else's order", async () => {
+            await expect(raffleFi.connect(user1).cancelTicketSellOrder(1, 0))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicketOrder")
+        })
+        it("should not cancel an order that does not exist", async () => {
+            /// ticket is assigned to the zero address so NotYourTicketOrder will be thrown
+            await expect(raffleFi.connect(user2).cancelTicketSellOrder(1, 1))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicketOrder")
+        })
+        it("should not cancel an order that has already been filled", async () => {
+            /// buy the ticket
+            await raffleFi.connect(user1).buyResaleTicket(1, 0, utils.parseEther("1"), constants.AddressZero, {value: utils.parseEther("1")})
+            /// cancel the order
+            await expect(raffleFi.connect(user2).cancelTicketSellOrder(1, 0))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicketOrder") // the order will have been deleted
+        })
+        it("should not cancel an order for a raffle that does not exist", async () => {
+            // the order owner will be address zero so NotYourOrder will be thrown
+            await expect(raffleFi.connect(user2).cancelTicketSellOrder(3, 0))
+            .to.be.revertedWithCustomError(raffleFi, "NotYourTicketOrder")
+        })
+        it("should cancel an order", async () => {
+            const raffleId = 1 
+            const ticketId = 0
+            await raffleFi.connect(user2).cancelTicketSellOrder(raffleId, ticketId)
+            const order = await raffleFi.ticketsOrders(raffleId, ticketId)
+            expect(order.owner).to.be.eq(constants.AddressZero)
+            expect(order.currency).to.be.eq(constants.AddressZero)
+            expect(order.price).to.be.eq(0)
+        })
+        it("should emit an event when cancelling an order", async () => {
+            const raffleId = 1 
+            const ticketId = 0
+            expect(await raffleFi.connect(user2).cancelTicketSellOrder(raffleId, ticketId))
+            .to.emit(raffleFi, "TicketSellOrderCancelled")
+            .withArgs(raffleId, ticketId, user2Address)
+        })
+        
+    })
+
+    describe("buyResaleTicket", () => {
+        const ticketPriceUSDT = utils.parseUnits("1", 18)
+        const ticketPriceUSDC = utils.parseUnits("1", 6)
+        const resaleTicketPrice = utils.parseEther("1")
+        const resaleTicketCurrency = constants.AddressZero
+        const raffleId = 1 
+        const ticketId = 0
+        beforeEach(async () =>  {
+            // raffle 1 ERC721
+            await erc721_1.connect(user1).approve(raffleFi.address, 1)
+            await raffleFi.createERC721Raffle(
+                erc721_1.address,
+                1,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDT,
+                constants.HashZero
+            )
+
+            // raffle 2 ERC20
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT)
+            await raffleFi.createERC20Raffle(
+                USDT.address,
+                utils.parseUnits("1", 18),
+                USDC.address,
+                new Date().valueOf() + 10000,
+                10,
+                ticketPriceUSDC,
+                constants.HashZero
+            )
+
+            // buy tickets on raffle one
+            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 5, []) // tickets 0-4
+            await USDT.connect(user1).approve(raffleFi.address, ticketPriceUSDT.mul(5))
+            await raffleFi.connect(user1).buyRaffleTicket(1, 4, []) // tickets 5-9
+
+            // buy tickets on raffle 2 
+            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(2, 5, []) // tickets 0-4
+
+            // create an order for raffle 2
+            await raffleFi.connect(user2).createTicketSellOrder(2, 0, constants.AddressZero, utils.parseEther("1"))
+            // cancel the raffle 2
+            await raffleFi.cancelRaffle(2)
+
+            // create a sell order for ticket 0 on raffle 1
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("1"))
+            // create a sell order with a ERC20 currency 
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, 1, USDT.address, utils.parseEther("1"))
+        })
+        it("should allow someone to fulfill their own order (not our problem)", async () => {
+            await raffleFi.connect(user2).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice})
+            const order = await raffleFi.ticketsOrders(1, 0)
+            // should be reset
+            expect(order.owner).to.be.eq(constants.AddressZero)
+            expect(await raffleFi.getTicketOwner(raffleId, ticketId)).to.be.eq(user2Address)
+        })
+        it("should not be possible to fulfill an order that does not exist", async () => {
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, 2, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "TicketNotForSale")
+        })
+        it("should not be possible to fulfill an order twice", async () => {
+            await raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice})
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "TicketNotForSale")
+        })
+        it("should not be possible to fulfill an order that was cancelled", async () => {
+            await raffleFi.connect(user2).cancelTicketSellOrder(raffleId, ticketId)
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "TicketNotForSale")
+        })
+        it("should assign the ticket to the buyer upon successful fulfillment", async () => {
+            await raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice})
+            expect(await raffleFi.getTicketOwner(raffleId, ticketId)).to.be.eq(user1Address)
+        })
+        it("should send the ticket price amount to the seller upon successful fulfillment", async () => {
+            const sellerBalanceBefore = await ethers.provider.getBalance(user2Address)
+            await raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice})
+            const sellerBalanceAfter = await ethers.provider.getBalance(user2Address)
+            expect(sellerBalanceAfter.sub(sellerBalanceBefore)).to.be.eq(resaleTicketPrice)
+        })
+        it("should emit an event when fulfilling an order", async () => {
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.emit(raffleFi, "TicketBoughtFromMarket")
+            .withArgs(raffleId, ticketId, user1Address, user2Address, resaleTicketPrice, resaleTicketCurrency)
+        })
+        it("should not allow to fulfill an order for a raffle that is not in progress", async () => {
+            // raffle 2 has an order but the raffle is not in progress
+            const order = await raffleFi.ticketsOrders(2, 0)
+            expect(order.owner).to.be.eq(user2Address)
+            await expect(raffleFi.connect(user1).buyResaleTicket(2, 0, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should not allow to fulfill an order for a raffle that does not exist", async () => {
+            // confirm raffle 3 does not exist
+            const raffleIdNotExistent = 3
+            await expect(raffleFi.getRaffleDetails(raffleIdNotExistent)).to.be.revertedWithCustomError(raffleFi, "RaffleDoesNotExist")
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleIdNotExistent, 0, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "TicketNotForSale")
+        })
+        it("should send the ticket price amount to the seller even if they are a bad receiver (revert in receive)", async () => {
+            // buy tickets with bad receiver 
+            await USDT.connect(user1).transfer(badReceiver.address, ticketPriceUSDT)
+            console.log(badReceiver)
+            await badReceiver.buyTicket(raffleId, 1, USDT.address, ticketPriceUSDT);
+            // we know they got the last ticket out of 10 so ticket 9
+            const ticketId = 9
+            const badTicketPrice = utils.parseEther("1")
+            expect(await raffleFi.getTicketOwner(raffleId, ticketId)).to.be.eq(badReceiver.address)
+            // create sale order 
+            await badReceiver.createSellOrder(raffleId, ticketId, badTicketPrice, constants.AddressZero)
+            // have user buy ticket 
+            const wethBalanceBefore = await WETH.balanceOf(badReceiver.address)
+            await raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, badTicketPrice, constants.AddressZero, {value: badTicketPrice})
+            // check 
+            const wethBalanceAfter = await WETH.balanceOf(badReceiver.address)
+            expect(wethBalanceAfter.sub(wethBalanceBefore)).to.be.eq(badTicketPrice)
+            // check buyer got ticket
+            expect(await raffleFi.getTicketOwner(raffleId, ticketId)).to.be.eq(user1Address)
+        })
+        it("should not be possible to buy a resale ticket without paying (Ether version)", async () => {
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency))
+            .to.be.revertedWithCustomError(raffleFi, "NotEnoughEther")
+        })
+        it("should not be possible to buy a resale ticket without paying (ERC20 version)", async () => {
+            // do not approve contract
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, USDT.address))
+            .to.be.reverted // this will kinda depend on the ERC20 implementation - but it should revert
+        })
+        it("should prevent a user from being frontrun by the seller (changes the price while the buyer is buying)", async () => {
+            // user2 changes the price for ticket 0 raffle 1 by creating another order which will overwrite the previous one
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, ticketId, constants.AddressZero, utils.parseEther("2"))
+            // user1 tries to buy the ticket but the price has changed
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, ticketId, resaleTicketPrice, resaleTicketCurrency, {value: resaleTicketPrice}))
+            .to.be.revertedWithCustomError(raffleFi, "WrongPrice")
+        })
+        it("should prevent a user from being frontrun by the seller (changes the currency while the buyer is buying)", async () => {
+            // user2 changes the currency for ticket 1 raffle 1 by creating another order which will overwrite the previous one
+            await raffleFi.connect(user2).createTicketSellOrder(raffleId, 1, USDC.address, utils.parseUnits("1", 6))
+            // user1 tries to buy the ticket but the currency has changed
+            await expect(raffleFi.connect(user1).buyResaleTicket(raffleId, 1, utils.parseUnits("1", 6), USDT.address))
+            .to.be.revertedWithCustomError(raffleFi, "WrongCurrency")
+        })
+    })
+
     describe("_handleNativeTransfer", () => {
         const ethersAmount = utils.parseEther("10")
         it("should revert when there is not enough ether", async () => {
@@ -1193,7 +1497,7 @@ describe("RaffleFi", function () {
         })
     })
 
-    describe("View", () => {
+    describe("View functions", () => {
         const ticketPriceUSDT = utils.parseUnits("1", 18)
         const ticketPriceUSDC = utils.parseUnits("1", 6)
         const numOfTickets = 10

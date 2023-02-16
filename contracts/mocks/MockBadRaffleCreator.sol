@@ -30,6 +30,23 @@ interface IRaffleFi {
         uint256 raffleId,
         bool approve 
     ) external;
+    function buyResaleTicket(
+        uint256 raffleId,
+        uint256 ticketId,
+        uint256 price,
+        address currency
+    ) external payable;
+    function createTicketSellOrder(
+        uint256 raffleId,
+        uint256 ticketId,
+        address currency,
+        uint256 price
+    ) external;
+    function buyRaffleTicket(
+        uint256 raffleId,
+        uint64 numberOfTickets,
+        bytes32[] calldata proof
+    ) external;
 }
 
 contract MockBadRaffleCreator {
@@ -49,7 +66,7 @@ contract MockBadRaffleCreator {
         uint256 endTimestamp,
         uint256 numberOfTickets,
         uint256 pricePerTicket,
-        bytes32 MerkleRoot
+        bytes32 MerkleRoot 
     ) external {
         IERC721(assetContract).approve(address(raffleFi), nftIdOrAmount);
         raffleFi.createERC721Raffle(
@@ -91,7 +108,20 @@ contract MockBadRaffleCreator {
         link.approve(address(raffleFi), type(uint256).max);
         raffleFi.completeRaffle(raffleId, accept);
     }
+
+    function buyTicket(uint256 raffleId, uint64 numberOfTickets, address currency, uint256 price) external {
+        IERC20(currency).approve(address(raffleFi), price * numberOfTickets);
+        raffleFi.buyRaffleTicket(raffleId, numberOfTickets, new bytes32[](0));
+    }
     
+    function buyResaleTicket(uint256 raffleId, uint256 ticketId, uint256 price) external {
+        raffleFi.buyResaleTicket{value: price}(raffleId, ticketId, price, address(0));
+    }
+
+    function createSellOrder(uint256 raffleId, uint256 ticketId, uint256 price, address currency) external {
+        raffleFi.createTicketSellOrder(raffleId, ticketId, currency, price);
+    }
+
     receive() external payable {
         revert("MockBadRaffleCreator: cannot receive ETH");
     }

@@ -59,13 +59,15 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     struct Order {
         address owner;
         address currency;
-        uint128 price;
+        uint256 price;
     }
 
     /// @notice raffleID => RaffleData
     mapping(uint256 => RaffleData) public raffles;
     /// @notice raffleID => ticketId => ticketOwner
     mapping(uint256 => mapping(uint256 => address)) public raffleTickets;
+    /// @notice raffleID => ticketId => ticketOrder
+    mapping(uint256 => mapping(uint256 => Order)) public ticketsOrders;
 
     /// @notice ChainlinkRequest => raffleID
     mapping(uint256 => uint256) public vrfRequestToRaffleID;
@@ -111,6 +113,11 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error UserNotWhitelisted();
     error RaffleAlreadyCompleted();
     error LinkFeeNotPaid();
+    error NotYourTicket();
+    error NotYourTicketOrder();
+    error WrongPrice();
+    error WrongCurrency();
+    error TicketNotForSale();
 
     /// @notice events 
     event NewRaffleCreated(uint256 raffleId);
@@ -128,6 +135,26 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         uint256 endTicketId
     );
     event VRFRequest(uint256 requestId);
+    event TicketSellOrderCreated(
+        uint256 raffleId, 
+        uint256 ticketId, 
+        address owner, 
+        address currency, 
+        uint256 price
+    );
+    event TicketSellOrderCancelled(
+        uint256 raffleId,
+        uint256 ticketId,
+        address owner
+    );
+    event TicketBoughtFromMarket(
+        uint256 raffleId,
+        uint256 ticketId,
+        address buyer,
+        address seller,
+        uint256 price,
+        address currency
+    );
 
     /// @notice constructor
     /// @param _weth <address> Address of the WETH contract
@@ -342,6 +369,74 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         }
     }
 
+    /// @notice Creates a sell order for a ticket 
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to sell a ticket for
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to sell
+    /// @param _currency <address> The currency the user wants to sell the ticket for
+    /// @param _price <uint256> The price the user wants to sell the ticket for
+    function createTicketSellOrder(
+        uint256 _raffleId, 
+        uint256 _ticketId,
+        address _currency,
+        uint256 _price
+    ) external {
+        if (msg.sender != raffleTickets[_raffleId][_ticketId]) revert NotYourTicket();
+        // this check could pass for raffles that do not exist, however the check above would have already reverted
+        if (raffles[_raffleId].raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
+
+        Order storage order = ticketsOrders[_raffleId][_ticketId];
+        order.owner = msg.sender;
+        order.currency = _currency;
+        order.price = _price;
+
+        emit TicketSellOrderCreated(_raffleId, _ticketId, msg.sender, _currency, _price);
+    }
+
+    /// @notice Allows users to cancel a sell order for a ticket
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to cancel a sell order for
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to cancel a sell order for
+    function cancelTicketSellOrder(uint256 _raffleId, uint256 _ticketId) external {
+        if (msg.sender != ticketsOrders[_raffleId][_ticketId].owner) revert NotYourTicketOrder();
+
+        delete ticketsOrders[_raffleId][_ticketId];
+        emit TicketSellOrderCancelled(_raffleId, _ticketId, msg.sender);
+    }
+
+    /// @notice Allows users to buy a ticket from another user
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to buy
+    /// @param _price <uint256> The price the user wants to buy the ticket for (frontrun protection)
+    /// @param _currency <address> The currency the user wants to buy the ticket for (frontrun protection)
+    function buyResaleTicket(uint256 _raffleId, uint256 _ticketId, uint256 _price, address _currency) external payable {
+        // store in memory
+        Order memory order = ticketsOrders[_raffleId][_ticketId];
+        if (order.owner == address(0)) revert TicketNotForSale();
+        // if the currency is Ether, they need to send the correct msg.value
+        // if _price is lower than the actual order price (buyer is trying to trick us by sending less Ether)
+        // we will still revert later when checking the price against the stored one 
+        if (order.currency == address(0) && msg.value != _price) revert NotEnoughEther();
+        // delete 
+        delete ticketsOrders[_raffleId][_ticketId];
+
+        /// @notice frontrun protection
+        // a seller could change the price and currency and the buyer might spend more tokens if their 
+        // allowance to the contract is high enough
+        if (order.price != _price) revert WrongPrice();
+        if (order.currency != _currency) revert WrongCurrency();
+
+        // make sure the raffle is still ongoing
+        if (raffles[_raffleId].raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
+
+        // assign the ticket
+        _assignTicketToUser(msg.sender, _raffleId, _ticketId, _ticketId);
+
+        emit TicketBoughtFromMarket(_raffleId, _ticketId, msg.sender, order.owner, _price, _currency);
+
+        // take payment
+        if (_currency == address(0)) _handleNativeTransfer(order.owner, _price);
+        else ERC20(_currency).safeTransferFrom(msg.sender, order.owner, _price);
+    }
+
     /// @notice Allows users to complete a Raffle. The winner of the raffle will receive the asset.
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
     /// @param accept <bool> If the user accepts the raffle to be completed
@@ -433,7 +528,6 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         if (raffleCurrency == address(0)) _handleNativeTransfer(raffleOwner, totalAmountEarned);
         else ERC20(raffleCurrency).safeTransfer(raffleOwner, totalAmountEarned);
     }
-
 
     /// @notice Allows users to claim a cancelled raffle where they will receive their initially payment
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
