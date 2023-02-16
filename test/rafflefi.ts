@@ -24,6 +24,7 @@ const createMerkleTree = (addresses: string[]): WhitelistData => {
 describe("RaffleFi", function () {
     let raffleFiFactory: ContractFactory
     let raffleFi: Contract 
+    let mockRaffleFiSetter: Contract
     let WETH: Contract
     let USDT: Contract 
     let ERC20: Contract
@@ -74,6 +75,17 @@ describe("RaffleFi", function () {
 
         raffleFiFactory = await ethers.getContractFactory("RaffleFi")
         raffleFi = await raffleFiFactory.deploy(
+            WETH.address,
+            LINKContract.address,
+            VRF_WRAPPER_ADDR,
+            1,
+            100000,
+            3
+        )
+
+        // mock rafflefi 
+        const mockRaffleFiSetterFactory = await ethers.getContractFactory("MockRaffleFiSetter")
+        mockRaffleFiSetter = await mockRaffleFiSetterFactory.connect(user1).deploy(
             WETH.address,
             LINKContract.address,
             VRF_WRAPPER_ADDR,
@@ -964,65 +976,220 @@ describe("RaffleFi", function () {
         })
     })
 
-    // only to be tested on goerli 
     describe("Claim", () => {
+        const erc20Amount = utils.parseUnits("100", 18)
         const ticketPriceUSDT = utils.parseUnits("1", 18)
         const ticketPriceUSDC = utils.parseUnits("1", 6)
+        const ticketPriceEther = utils.parseEther("1")
         beforeEach(async () => {
-            // raffle 1 ERC721
-            await erc721_1.connect(user1).approve(raffleFi.address, 1)
-            await raffleFi.createERC721Raffle(
-                erc721_1.address,
-                1,
-                USDT.address,
-                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
-                10,
-                ticketPriceUSDT,
-                constants.HashZero
-            )
-
-            // raffle 2 ERC20
-            await USDT.connect(user1).approve(raffleFi.address, utils.parseUnits("1", 18))
-            await raffleFi.createERC20Raffle(
-                USDT.address,
-                utils.parseUnits("1", 18),
-                USDC.address,
-                (await ethers.provider.getBlock("latest")).timestamp + 60 * 60 * 2,
-                10,
-                ticketPriceUSDC,
-                constants.HashZero
-            )
-
-            // buy tickets for ERC721 raffle
-            await USDT.connect(user2).approve(raffleFi.address, ticketPriceUSDT.mul(10))
-            await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
-
-            // buy tickets for ERC20 raffle
-            await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
-            await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
-
-            // approve LINK for VRF
-            await LINKContract.connect(user1).approve(raffleFi.address, constants.MaxUint256)
+            // transfer assets so we can transfer  
+            await erc721_1.connect(user1).transferFrom(user1Address, mockRaffleFiSetter.address, 1)
+            await USDT.mint(mockRaffleFiSetter.address, utils.parseUnits("1000000", 18))
+            await USDC.mint(mockRaffleFiSetter.address, utils.parseUnits("1000000", 6))
+            // we mock two raffles finished
+            await mockRaffleFiSetter.setRaffle(0, {
+                assetContract: erc721_1.address,
+                raffleOwner: user1Address,
+                raffleWinner: user2Address,
+                raffleState: 2,
+                raffleType: 0,
+                currency: USDT.address,
+                MerkleRoot: constants.HashZero,
+                nftIdOrAmount: 1,
+                pricePerTicket: ticketPriceUSDT,
+                endTimestamp: 0,
+                numberOfTickets: 5,
+                ticketsSold: 5
+            })
+            await mockRaffleFiSetter.setRaffle(1, {
+                assetContract: USDT.address,
+                raffleOwner: user2Address,
+                raffleWinner: user1Address,
+                raffleState: 2,
+                raffleType: 1,
+                currency: USDC.address,
+                MerkleRoot: constants.HashZero,
+                nftIdOrAmount: erc20Amount,
+                pricePerTicket: ticketPriceUSDC,
+                endTimestamp: 0,
+                numberOfTickets: 10,
+                ticketsSold: 10
+            })
+            await mockRaffleFiSetter.setRaffle(2, {
+                assetContract: USDT.address,
+                raffleOwner: user2Address,
+                raffleWinner: constants.AddressZero,
+                raffleState: 1,
+                raffleType: 1,
+                currency: USDC.address,
+                MerkleRoot: constants.HashZero,
+                nftIdOrAmount: erc20Amount,
+                pricePerTicket: ticketPriceUSDC,
+                endTimestamp: 0,
+                numberOfTickets: 10,
+                ticketsSold: 10
+            })
         })
         it("should allow the winner to claim the prize for an ERC721 raffle", async () => {
-            if (network.config.chainId !== 5) { return }
+            await mockRaffleFiSetter.connect(user2).claimRaffle(0)
+            expect(await erc721_1.ownerOf(1)).to.be.eq(user2Address)
         })
         it("should allow the winner to claim the prize for an ERC20 raffle", async () => {
-            if (network.config.chainId !== 5) { return }
+            const balanceBefore = await USDT.balanceOf(user1Address)
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            const balanceAfter = await USDT.balanceOf(user1Address)
+            expect(balanceAfter.sub(balanceBefore)).to.be.eq(erc20Amount)            
         })
         it("should prevent users from claiming the prize if the raffle is not completed", async () => {
-            await expect(raffleFi.connect(user1).claimRaffle(1))
+            await expect(mockRaffleFiSetter.connect(user1).claimRaffle(2))
             .to.be.revertedWithCustomError(raffleFi, "RaffleNotCompleted")
         })
         it("should prevent to claim a non existent raffle", async () => {
-            await expect(raffleFi.connect(user1).claimRaffle(3))
+            await expect(mockRaffleFiSetter.connect(user1).claimRaffle(3))
             .to.be.revertedWithCustomError(raffleFi, "RaffleDoesNotExist")
         })
-        it("should prevent users from claiming the prize if they are not the winner", async () => {
-            if (network.config.chainId !== 5) { return }
+        it("should allow anyone to call the claimRaffle function but the assets should be transferred to the actual winner", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(0)
+            expect(await erc721_1.ownerOf(1)).to.be.eq(user2Address)
+        })
+        it("should transfer the tickets money to the raffle owner", async () => {
+            const balanceBefore = await USDC.balanceOf(user2Address)
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            const balanceAfter = await USDC.balanceOf(user2Address)
+            expect(balanceAfter.sub(balanceBefore)).to.be.eq(ticketPriceUSDC.mul(10))
+        })
+        it("should prevent from claiming twice", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            await expect(mockRaffleFiSetter.connect(user1).claimRaffle(1))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotCompleted")
+        })
+        it("should successfully complete even with a blocking receiver contract (winner revert on receive Ether - Ether as asset raffled)", async () => {
+            // create raffle with Ether as asset raffled 
+            const etherAmount = utils.parseEther("10")
+            await user1.sendTransaction({
+                nonce: user1.getTransactionCount("latest"),
+                from: user1Address,
+                to: mockRaffleFiSetter.address,
+                value: etherAmount // send the amount to the raffle contract
+            })
+            await mockRaffleFiSetter.setRaffle(3, {
+                assetContract: constants.AddressZero,
+                raffleOwner: user2Address,
+                raffleWinner: badReceiver.address,
+                raffleState: 2,
+                raffleType: 1,
+                currency: USDC.address,
+                MerkleRoot: constants.HashZero,
+                nftIdOrAmount: etherAmount,
+                pricePerTicket: ticketPriceUSDC,
+                endTimestamp: 0,
+                numberOfTickets: 10,
+                ticketsSold: 10
+            })
+            const balanceBefore = await WETH.balanceOf(badReceiver.address)
+            await mockRaffleFiSetter.connect(user1).claimRaffle(3)
+            const balanceAfter = await WETH.balanceOf(badReceiver.address)
+            expect(balanceBefore.add(etherAmount)).to.be.eq(balanceAfter)
+        })
+        it("should successfully complete even with a blocking receiver contract (seller revert on receive Ether - Ether as currency)", async () => {
+            await user1.sendTransaction({
+                nonce: user1.getTransactionCount("latest"),
+                from: user1Address,
+                to: mockRaffleFiSetter.address,
+                value: ticketPriceEther.mul(10) // send the ticket value to the raffle contract
+            })
+            await mockRaffleFiSetter.setRaffle(3, {
+                assetContract: USDT.address,
+                raffleOwner: badReceiver.address,
+                raffleWinner: user1Address,
+                raffleState: 2,
+                raffleType: 1,
+                currency: constants.AddressZero, // ethers as currency
+                MerkleRoot: constants.HashZero,
+                nftIdOrAmount: erc20Amount,
+                pricePerTicket: ticketPriceEther,
+                endTimestamp: 0,
+                numberOfTickets: 10,
+                ticketsSold: 10
+            })
+            const balanceBefore = await WETH.balanceOf(badReceiver.address)
+            const balanceBeforeWinner = await USDT.balanceOf(user1Address)
+            await mockRaffleFiSetter.connect(user1).claimRaffle(3)
+            const balanceAfter = await WETH.balanceOf(badReceiver.address)
+            const balanceAfterWinner = await USDT.balanceOf(user1Address)
+            expect(balanceBefore.add(ticketPriceEther.mul(10))).to.be.eq(balanceAfter) 
+
+            // check also winner 
+            expect(balanceAfterWinner.sub(balanceBeforeWinner)).to.be.eq(erc20Amount)
+            
+        })
+        it("should prevent cancelling after claiming", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            await expect(mockRaffleFiSetter.connect(user2).cancelRaffle(1))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should prevent buying a ticket after a raffle was claimed (still within the raffle deadline)", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            await expect(mockRaffleFiSetter.connect(user1).buyRaffleTicket(1, 0, []))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+        })
+        it("should not allow to refund a raffle that was claimed", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            await expect(mockRaffleFiSetter.connect(user2).claimCancelledRaffle(1, [0, 5]))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleCannotBeRefunded")
+        })
+        it("should prevent completing a raffle that was already claimed (asking for a second random number)", async () => {
+            await mockRaffleFiSetter.connect(user1).claimRaffle(1)
+            await expect(mockRaffleFiSetter.connect(user2).completeRaffle(1, true))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
         })
         it("should emit an event when claiming the prize", async () => {
-            if (network.config.chainId !== 5) { return }
+            expect(await mockRaffleFiSetter.connect(user2).claimRaffle(0)).to.emit(mockRaffleFiSetter, "RaffleStateChanged")
+            .withArgs(2, 4)
+        })
+    })
+
+    describe("_handleNativeTransfer", () => {
+        const ethersAmount = utils.parseEther("10")
+        it("should revert when there is not enough ether", async () => {
+            await expect(mockRaffleFiSetter.handleNativeTransfer(user1Address, ethersAmount))
+            .to.be.revertedWithCustomError(raffleFi, "NotEnoughEther")
+        })
+        it("should convert Ether to WETH if the transfer fails", async () => {
+            await user1.sendTransaction({
+                nonce: user1.getTransactionCount("latest"),
+                from: user1Address,
+                to: mockRaffleFiSetter.address,
+                value: ethersAmount
+            })
+            const balanceBefore = await WETH.balanceOf(badReceiver.address)
+            await mockRaffleFiSetter.handleNativeTransfer(badReceiver.address, ethersAmount)
+            const balanceAfter = await WETH.balanceOf(badReceiver.address)
+            expect(balanceBefore.add(ethersAmount)).to.be.eq(balanceAfter)
+        })
+        it("should transfer the Ether", async () => {
+            await user1.sendTransaction({
+                nonce: user1.getTransactionCount("latest"),
+                from: user1Address,
+                to: mockRaffleFiSetter.address,
+                value: ethersAmount
+            })
+            const balanceBefore = await user2.getBalance("latest")
+            await mockRaffleFiSetter.handleNativeTransfer(user2Address, ethersAmount)
+            const balanceAfter = await user2.getBalance("latest")
+            expect(balanceBefore.add(ethersAmount)).to.be.eq(balanceAfter)
+        })
+    })
+
+    describe("_assignTicketToUser", () => {
+        it("should assign the tickets to the correct user", async () => {
+            await mockRaffleFiSetter.assignTicketToUser(user1Address, 0, 0, 0) // 0 to 0 
+            await mockRaffleFiSetter.assignTicketToUser(user2Address, 1, 1, 5) // 1 to 4
+            expect(await mockRaffleFiSetter.raffleTickets(0, 0)).to.be.eq(user1Address)
+            expect(await mockRaffleFiSetter.raffleTickets(1, 1)).to.be.eq(user2Address)
+            expect(await mockRaffleFiSetter.raffleTickets(1, 2)).to.be.eq(user2Address)
+            expect(await mockRaffleFiSetter.raffleTickets(1, 3)).to.be.eq(user2Address)
+            expect(await mockRaffleFiSetter.raffleTickets(1, 4)).to.be.eq(user2Address)
         })
     })
 

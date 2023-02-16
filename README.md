@@ -1,5 +1,7 @@
 # RaffleFi
 
+![CI](https://github.com/RaffleFiOrg/RaffleFi-Standalone-Contracts/actions/workflows/contracts.yml/badge.svg)
+
 ```
  ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
 ▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒

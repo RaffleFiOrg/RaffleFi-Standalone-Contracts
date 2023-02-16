@@ -8,6 +8,18 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {IERC721} from "../interfaces/IERC721.sol";
 import {IWETH} from "../interfaces/IWETH9.sol";
 
+/*
+ ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
+▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
+▓██ ░▄█ ▒▒██  ▀█▄  ▒████ ░▒████ ░▒██░    ▒███   ▒████ ░▒██▒
+▒██▀▀█▄  ░██▄▄▄▄██ ░▓█▒  ░░▓█▒  ░▒██░    ▒▓█  ▄ ░▓█▒  ░░██░
+░██▓ ▒██▒ ▓█   ▓██▒░▒█░   ░▒█░   ░██████▒░▒████▒░▒█░   ░██░
+░ ▒▓ ░▒▓░ ▒▒   ▓▒█░ ▒ ░    ▒ ░   ░ ▒░▓  ░░░ ▒░ ░ ▒ ░   ░▓  
+  ░▒ ░ ▒░  ▒   ▒▒ ░ ░      ░     ░ ░ ▒  ░ ░ ░  ░ ░      ▒ ░
+  ░░   ░   ░   ▒    ░ ░    ░ ░     ░ ░      ░    ░ ░    ▒ ░
+   ░           ░  ░                  ░  ░   ░  ░        ░  
+*/
+
 /// @title RaffleFi
 /// @author unt4x3d && ctrlc03
 /// @notice RaffleFi main contract
@@ -75,8 +87,6 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     uint16 public constant MINIMUM_RAFFLE_DURATION = 1 hours;
     /// @notice callback gas limit for VRF request
     uint32 public immutable callbackGasLimit;
-    /// @notice LINK Fee for VRF request
-    uint64 public immutable linkFee;
 
     /// @notice custom errors 
     error NotYourRaffle();
@@ -126,21 +136,18 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     /// @param _numOfWords <uint8> Number of random numbers per request
     /// @param _callbackGasLimit <uint32> Callback gas limit for VRF request
     /// @param _requestConfirmations <uint8> Number of confirmations for VRF request
-    /// @param _linkFee <uint64> LINK Fee for VRF request
     constructor(
         address _weth,
         address _link,
         address _wrapper,
         uint8 _numOfWords,
         uint32 _callbackGasLimit,
-        uint8 _requestConfirmations,
-        uint64 _linkFee
+        uint8 _requestConfirmations
     ) payable VRFV2WrapperConsumerBase(_link, _wrapper) {
         WETH = IWETH(_weth);
         numberOfWords = _numOfWords;
         callbackGasLimit = _callbackGasLimit;
         requestConfirmations = _requestConfirmations;
-        linkFee = _linkFee;
     }
 
     /// @notice Create a new ERC721 raffle
@@ -185,9 +192,6 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
             });
 
             emit NewRaffleCreated(_raffleId);
-
-            // take LINK Fee 
-            _takeLINKFee();
 
             // transfer NFT 
             IERC721(assetContract).transferFrom(msg.sender, address(this), nftIdOrAmount);
@@ -245,9 +249,6 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
             emit NewRaffleCreated(_raffleId);
         }   
 
-        // take LINK Fee
-        _takeLINKFee();
-        
         // take money if not ether 
         if (assetContract != address(0)) {
             /// @notice here we make sure deflationary tokens are not accepted
@@ -285,9 +286,6 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
             else ERC20(raffleData.assetContract).safeTransfer(raffleData.raffleOwner, raffleData.nftIdOrAmount);
         }
 
-        // refund LINK
-        LINK.transfer(raffleData.raffleOwner, linkFee);
-
         emit RaffleCancelled(_raffleId);
     }
 
@@ -300,8 +298,8 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
 
         // check if the raffle exists
         if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
-        // check that the raffle has not ended yet
-        if (block.timestamp > raffleData.endTimestamp) revert RaffleEnded();
+        // // check that the raffle has not ended yet
+        // if (block.timestamp > raffleData.endTimestamp) revert RaffleEnded();
         // the raffle must be in progress
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
         // check that the raffle is not sold out yet
@@ -464,17 +462,17 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     /// @param _raffleId <uint256> The ID of the raffle
     /// @return requestId <uint256> The ID of the VRF request
     function _requestRandomness(uint256 _raffleId) internal returns (uint256 requestId) {
-        // uint256 price = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
-        // if (price > LINK.balanceOf(address(this))) revert NotEnoughTokens();
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
-        // requestId = requestRandomness(
-        //     callbackGasLimit,
-        //     requestConfirmations,
-        //     numberOfWords
-        // );
-        requestId = 5;
+        // take LINK fee
+        _takeLINKFee();
+        // request random number 
+        requestId = requestRandomness(
+            callbackGasLimit,
+            requestConfirmations,
+            numberOfWords
+        );
     }
 
     /// @notice Callback function used by VRF Coordinator
@@ -509,6 +507,7 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
         }
     }
 
+
     /// @notice set the tickets to its owner
     /// @param user <address> The user to assign the tickets to
     /// @param _raffleId <uint256> The raffle ID
@@ -532,6 +531,8 @@ contract MockRaffleFiNoDeadline is VRFV2WrapperConsumerBase {
     /// @notice collects the LINK fee for the random number needed 
     /// @notice for the raffle
     function _takeLINKFee() private {
+        // calculate fee 
+        uint256 linkFee = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
         // we need to take the payment for the LINK fee
         uint256 linkBalanceBefore = LINK.balanceOf(address(this));
         LINK.transferFrom(msg.sender, address(this), linkFee);
