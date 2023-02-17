@@ -25,11 +25,13 @@ A seller can decide on their raffle options such as:
 * Merkle root - used to create private raffles
 * currency for ticket payment
 
-Buyers can buy tickets up until the deadline of the raffle, or until tickets are sold out. The seller can cancel the raffle at any time to regain control of their assets (whether this is a ERC20/Ether or an ERC721 token). Buyers will be able to claim a refund on their tickets. Unfortunately gas fees will be lost. 
+Buyers can buy tickets up until the deadline of the raffle, or until tickets are sold out. The seller can cancel the raffle at any time to regain control of their assets (whether this is a ERC20/Ether or an ERC721 token). Buyers will be able to claim a refund on their tickets, but unfortunately gas fees will be lost. Furthermore ticket holders can sell tickets to other users should they wish to. 
 
 NOTE: if tickets are not sold out, a seller can decide to go ahead with a raffle anyways.
 
-NOTE (2): use at discretion. You will lose gas fees if a seller decides to cancel a raffle. 
+NOTE (2): use at discretion. You will lose gas fees (but not your ticket money) if a seller decides to cancel a raffle. 
+
+NOTE (3): we decided to allow a seller to cancel a raffle until the a winner is extracted. At this point, they will not be able to cancel anymore. This is due to there possibly being a error in the VRF request, and the assets being stuck in the contract. Please note that sellers will lose the LINK fee this way as the VRF request is not refundable.
 
 ## Installation
 

@@ -118,6 +118,8 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error WrongPrice();
     error WrongCurrency();
     error TicketNotForSale();
+    error RaffleCannotBeCancelled();
+    error RaffleWasCancelled();
 
     /// @notice events 
     event NewRaffleCreated(uint256 raffleId);
@@ -298,12 +300,24 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         RaffleData memory raffleData = raffles[_raffleId];
         // cannot cancel someone else's raffle
         if (msg.sender != raffleData.raffleOwner) revert NotYourRaffle();
-        // the raffle must be in progress to be cancelled
-        // if (raffleData.raffleWinner != address(0)) revert RaffleClaimed(); 
-        if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
+        // raffle owner can cancel:
+        // 1. after creating (IN_PROGRESS)
+        // 2. after people bought tickets (IN_PROGRESS)
+        // 3. after the deadline (IN_PROGRESS) 
+        // 4. after calling complete raffle 
+        // at this point, they would want to complete the raffle 
+        // because they will be paying the LINK fee
+        // however, to avoid a situation where the oracle is not 
+        // returning a random number, we allow to cancel before the
+        // random number is returned. Once the number if returned,
+        // the winner will be chosen and anyone can call claimRaffle to issue the reward
+        // and asset
+        if (
+            raffleData.raffleState != RaffleState.IN_PROGRESS &&
+            raffleData.raffleState != RaffleState.FINISHED 
+        ) revert RaffleCannotBeCancelled();
 
         // Set is as REFUNDED
-        // raffles[_raffleId].raffleOwner = address(0);
         raffles[_raffleId].raffleState = RaffleState.REFUNDED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
 
@@ -583,6 +597,9 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         RaffleData storage raffleData = raffles[raffleId];
         /// should not happen but what if VRF calls back twice? this next check will prevent
         if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
+        // we also want to check that the raffle was not cancelled before the 
+        // random number is received
+        if (raffleData.raffleState == RaffleState.REFUNDED) revert RaffleWasCancelled();
         raffleData.raffleState = RaffleState.COMPLETED;
         emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
         // Picking up the winner

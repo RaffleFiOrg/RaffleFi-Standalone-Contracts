@@ -25,6 +25,7 @@ describe("RaffleFi", function () {
     let raffleFiFactory: ContractFactory
     let raffleFi: Contract 
     let mockRaffleFiSetter: Contract
+    let mockRaffleFiVRF: Contract 
     let WETH: Contract
     let USDT: Contract 
     let ERC20: Contract
@@ -85,6 +86,16 @@ describe("RaffleFi", function () {
         // mock rafflefi 
         const mockRaffleFiSetterFactory = await ethers.getContractFactory("MockRaffleFiSetter")
         mockRaffleFiSetter = await mockRaffleFiSetterFactory.connect(user1).deploy(
+            WETH.address,
+            LINKContract.address,
+            VRF_WRAPPER_ADDR,
+            1,
+            100000,
+            3
+        )
+
+        const mockRaffleFiVRFFactory = await ethers.getContractFactory("MockRaffleVRF")
+        mockRaffleFiVRF = await mockRaffleFiVRFFactory.connect(user1).deploy(
             WETH.address,
             LINKContract.address,
             VRF_WRAPPER_ADDR,
@@ -381,7 +392,7 @@ describe("RaffleFi", function () {
         })
         it("should prevent cancelling a raffle that is not in the correct state", async () => {
             await raffleFi.connect(user1).cancelRaffle(1)
-            await expect(raffleFi.connect(user1).cancelRaffle(1)).to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+            await expect(raffleFi.connect(user1).cancelRaffle(1)).to.be.revertedWithCustomError(raffleFi, "RaffleCannotBeCancelled")
         })
         it("should emit an event when cancelling a raffle", async () => {
             await expect(raffleFi.connect(user1).cancelRaffle(1))
@@ -427,9 +438,8 @@ describe("RaffleFi", function () {
         })
         it("should not allow to cancel a raffle twice", async () => {
             await raffleFi.connect(user1).cancelRaffle(1)
-            await expect(raffleFi.connect(user1).cancelRaffle(1)).to.be.revertedWithCustomError(raffleFi, "RaffleNotInProgress")
+            await expect(raffleFi.connect(user1).cancelRaffle(1)).to.be.revertedWithCustomError(raffleFi, "RaffleCannotBeCancelled")
         })
-        it("should prevent cancelling a raffle that has already been drawn", async () => {})
         it("should prevent canceling a raffle that does not exist", async () => {
             // raffleOwner -> address(0) -> NotYourRaffle 
             await expect(raffleFi.connect(user1).cancelRaffle(3)).to.be.revertedWithCustomError(raffleFi, "NotYourRaffle")
@@ -470,6 +480,62 @@ describe("RaffleFi", function () {
             await raffleFi.connect(user1).cancelRaffle(3)
             expect(await raffleFi.getRaffleState(3)).to.be.eq(3)
             expect(await erc721_1.ownerOf(2)).to.be.eq(user1Address)
+        })
+        it("should still be possible to cancel a raffle after a random number was requested", async () => {
+            await USDT.connect(user2).approve(raffleFi.address, utils.parseUnits("1", 18).mul(10))
+            await raffleFi.connect(user2).buyRaffleTicket(1, 10, [])
+            let raffle = await raffleFi.raffles(1)
+            expect(raffle.ticketsSold).to.be.eq(10)
+
+            // now complete raffle 
+            await LINKContract.connect(user1).approve(raffleFi.address, utils.parseUnits("1", 18))
+            await raffleFi.connect(user1).completeRaffle(1, true)
+
+            // now cancel before the winner is chosen
+            raffle = await raffleFi.getRaffleDetails(1)
+            expect(raffle.raffleWinner).to.be.eq(constants.AddressZero)
+            await raffleFi.connect(user1).cancelRaffle(1)
+            expect(await raffleFi.getRaffleState(1)).to.be.eq(3)
+
+            // check nft is back
+            expect(await erc721_1.ownerOf(1)).to.be.eq(user1Address)
+        })
+        it("should not allow to cancel a raffle after the winner was chosen", async () => {
+            // raffle 1 ERC721
+            const nftId = 2
+            await erc721_1.connect(user1).approve(mockRaffleFiVRF.address, nftId)
+            await mockRaffleFiVRF.createERC721Raffle(
+                erc721_1.address,
+                nftId,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                utils.parseUnits("1", 18),
+                constants.HashZero
+            )
+
+            // buy tickets
+            await USDT.connect(user2).approve(mockRaffleFiVRF.address, utils.parseUnits("1", 18).mul(10))
+            await mockRaffleFiVRF.connect(user2).buyRaffleTicket(1, 10, [])
+            let raffle = await mockRaffleFiVRF.getRaffleDetails(1)
+            expect(raffle.ticketsSold).to.be.eq(10)
+
+            // complete raffle
+            await LINKContract.connect(user1).approve(mockRaffleFiVRF.address, constants.MaxUint256)
+            const tx = await mockRaffleFiVRF.connect(user1).completeRaffle(1, true)
+            const receipt = await tx.wait()
+            const requestId = receipt.events[5].args[0].toString()
+
+            // send random number
+            await mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [131]) // 131 % 10 
+
+            // check winner
+            raffle = await mockRaffleFiVRF.getRaffleDetails(1)
+            expect(raffle.raffleWinner).to.be.eq(user2Address) // only one that bought a ticket
+
+            // try to cancel 
+            await expect(mockRaffleFiVRF.connect(user1).cancelRaffle(1))
+            .to.be.revertedWithCustomError(mockRaffleFiVRF, "RaffleCannotBeCancelled")
         })
     })
 
@@ -1411,7 +1477,6 @@ describe("RaffleFi", function () {
         it("should send the ticket price amount to the seller even if they are a bad receiver (revert in receive)", async () => {
             // buy tickets with bad receiver 
             await USDT.connect(user1).transfer(badReceiver.address, ticketPriceUSDT)
-            console.log(badReceiver)
             await badReceiver.buyTicket(raffleId, 1, USDT.address, ticketPriceUSDT);
             // we know they got the last ticket out of 10 so ticket 9
             const ticketId = 9
@@ -1494,6 +1559,69 @@ describe("RaffleFi", function () {
             expect(await mockRaffleFiSetter.raffleTickets(1, 2)).to.be.eq(user2Address)
             expect(await mockRaffleFiSetter.raffleTickets(1, 3)).to.be.eq(user2Address)
             expect(await mockRaffleFiSetter.raffleTickets(1, 4)).to.be.eq(user2Address)
+        })
+    })
+
+    describe("fulfilRandomWords", () => {
+        let requestId: string = ""
+        beforeEach(async () => {
+            // raffle 1 ERC721
+            const nftId = 2
+            await erc721_1.connect(user1).approve(mockRaffleFiVRF.address, nftId)
+            await mockRaffleFiVRF.createERC721Raffle(
+                erc721_1.address,
+                nftId,
+                USDT.address,
+                new Date().valueOf() + 10000,
+                10,
+                utils.parseUnits("1", 18),
+                constants.HashZero
+            )
+
+            // buy tickets
+            await USDT.connect(user2).approve(mockRaffleFiVRF.address, utils.parseUnits("1", 18).mul(10))
+            // user2 tickets 0 - 4
+            await mockRaffleFiVRF.connect(user2).buyRaffleTicket(1, 5, [])
+            await USDT.connect(user1).approve(mockRaffleFiVRF.address, utils.parseUnits("1", 18).mul(10))
+            // user2 tickets 5 - 9
+            await mockRaffleFiVRF.connect(user1).buyRaffleTicket(1, 5, [])
+            let raffle = await mockRaffleFiVRF.getRaffleDetails(1)
+            expect(raffle.ticketsSold).to.be.eq(10)
+
+            // complete raffle
+            await LINKContract.connect(user1).approve(mockRaffleFiVRF.address, constants.MaxUint256)
+            const tx = await mockRaffleFiVRF.connect(user1).completeRaffle(1, true)
+            const receipt = await tx.wait()
+            requestId = receipt.events[5].args[0].toString()
+        })
+        it("should fail when the raffle is cancelled", async () => {
+            await mockRaffleFiVRF.connect(user1).cancelRaffle(1)
+            await expect(mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [121]))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleWasCancelled")
+        })
+        it("should emit an event", async () => {
+            // send random number
+            expect(await mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [131])) // 131 % 10 
+            .to.emit(raffleFi, "RaffleStateChanged")
+            .withArgs(1, 2) // FINISHED -> COMPLETED
+        })
+        it("should draw the correct winner", async () => {
+            // send random number
+            await mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [15]) // 15 % 10 = 5
+            const raffle = await mockRaffleFiVRF.getRaffleDetails(1)
+            expect(raffle.raffleWinner).to.be.eq(user1Address)
+        })
+        it("should set the raffle state to completed", async () => {
+            // send random number
+            await mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [15]) // 15 % 10 = 5
+            const raffle = await mockRaffleFiVRF.getRaffleDetails(1)
+            expect(raffle.raffleState).to.be.eq(2)
+        })
+        it("should not be possible to call this function twice", async () => {
+            // send random number
+            await mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [15]) // 15 % 10 = 5
+            await expect(mockRaffleFiVRF.fulfillRandomWordsTest(requestId, [15]))
+            .to.be.revertedWithCustomError(raffleFi, "RaffleAlreadyCompleted")
         })
     })
 

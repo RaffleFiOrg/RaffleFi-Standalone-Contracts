@@ -20,10 +20,10 @@ import {IWETH} from "../interfaces/IWETH9.sol";
    ░           ░  ░                  ░  ░   ░  ░        ░  
 */
 
-/// @title a mock version of RaffleFi
+/// @title RaffleFi
 /// @author unt4x3d && ctrlc03
 /// @notice RaffleFi main contract
-contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
+contract MockRaffleVRF is VRFV2WrapperConsumerBase {
     using SafeTransferLib for ERC20;
 
     enum RaffleState {
@@ -59,13 +59,15 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
     struct Order {
         address owner;
         address currency;
-        uint128 price;
+        uint256 price;
     }
 
     /// @notice raffleID => RaffleData
     mapping(uint256 => RaffleData) public raffles;
     /// @notice raffleID => ticketId => ticketOwner
     mapping(uint256 => mapping(uint256 => address)) public raffleTickets;
+    /// @notice raffleID => ticketId => ticketOrder
+    mapping(uint256 => mapping(uint256 => Order)) public ticketsOrders;
 
     /// @notice ChainlinkRequest => raffleID
     mapping(uint256 => uint256) public vrfRequestToRaffleID;
@@ -111,6 +113,13 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
     error UserNotWhitelisted();
     error RaffleAlreadyCompleted();
     error LinkFeeNotPaid();
+    error NotYourTicket();
+    error NotYourTicketOrder();
+    error WrongPrice();
+    error WrongCurrency();
+    error TicketNotForSale();
+    error RaffleCannotBeCancelled();
+    error RaffleWasCancelled();
 
     /// @notice events 
     event NewRaffleCreated(uint256 raffleId);
@@ -128,6 +137,26 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         uint256 endTicketId
     );
     event VRFRequest(uint256 requestId);
+    event TicketSellOrderCreated(
+        uint256 raffleId, 
+        uint256 ticketId, 
+        address owner, 
+        address currency, 
+        uint256 price
+    );
+    event TicketSellOrderCancelled(
+        uint256 raffleId,
+        uint256 ticketId,
+        address owner
+    );
+    event TicketBoughtFromMarket(
+        uint256 raffleId,
+        uint256 ticketId,
+        address buyer,
+        address seller,
+        uint256 price,
+        address currency
+    );
 
     /// @notice constructor
     /// @param _weth <address> Address of the WETH contract
@@ -149,6 +178,121 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         callbackGasLimit = _callbackGasLimit;
         requestConfirmations = _requestConfirmations;
     }
+
+    /// @notice Create a new ERC721 raffle
+    /// @param assetContract <address> Address of the ERC721 contract
+    /// @param nftIdOrAmount <uint256> ID of the NFT to be raffled
+    /// @param currency <address> Address of the currency to be used for tickets
+    /// @param endTimestamp <uint256> Timestamp when the raffle will end
+    /// @param numberOfTickets <uint256> Total number of tickets to be sold
+    /// @param pricePerTicket <uint256> Price per ticket in wei
+    /// @param MerkleRoot <bytes32> Merkle root of the allowed addresses
+    /// @return _raffleId <uint256> ID of the new raffle
+    function createERC721Raffle(
+        address assetContract,
+        uint256 nftIdOrAmount,
+        address currency,
+        uint256 endTimestamp,
+        uint256 numberOfTickets,
+        uint256 pricePerTicket,
+        bytes32 MerkleRoot
+    ) external returns (uint256 _raffleId) {
+        // the raffle must last at least 1 hour
+        if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
+        // the creator must own the NFT
+        if (IERC721(assetContract).ownerOf(nftIdOrAmount) != msg.sender) revert NotYourAsset();
+        // at least 2 tickets
+        if (numberOfTickets < MINIUM_NUMBER_OF_TICKETS) revert NotEnoughTickets();
+        
+        // store the raffle data
+        unchecked {
+            _raffleId = ++raffleCounter;
+            raffles[_raffleId] = RaffleData({
+                assetContract: assetContract,
+                raffleOwner: msg.sender,
+                raffleWinner: address(0),
+                raffleState: RaffleState.IN_PROGRESS,
+                raffleType: RaffleType.ERC721,
+                nftIdOrAmount: uint128(nftIdOrAmount),
+                currency: currency,
+                pricePerTicket: uint128(pricePerTicket),
+                MerkleRoot: MerkleRoot,
+                endTimestamp: uint64(endTimestamp),
+                numberOfTickets: uint64(numberOfTickets),
+                ticketsSold: 0
+            });
+
+            emit NewRaffleCreated(_raffleId);
+
+            // transfer NFT 
+            IERC721(assetContract).transferFrom(msg.sender, address(this), nftIdOrAmount);
+            // make sure that the NFT was transferred
+            if (IERC721(assetContract).ownerOf(nftIdOrAmount) != address(this)) revert NFTNotTransferred();
+        }
+    }
+
+    /// @notice Create a new ERC20 raffle
+    /// @param assetContract <address> Address of the ERC20 contract
+    /// @param nftIdOrAmount <uint256> Amount of tokens to be raffled
+    /// @param currency <address> Address of the currency to be used for tickets
+    /// @param endTimestamp <uint256> Timestamp when the raffle will end
+    /// @param numberOfTickets <uint256> Total number of tickets to be sold
+    /// @param pricePerTicket <uint256> Price per ticket in wei
+    /// @param MerkleRoot <bytes32> Merkle root of the allowed addresses
+    /// @return _raffleId <uint256> ID of the new raffle
+    function createERC20Raffle(
+        address assetContract,
+        uint256 nftIdOrAmount,
+        address currency,
+        uint256 endTimestamp,
+        uint256 numberOfTickets,
+        uint256 pricePerTicket,
+        bytes32 MerkleRoot
+    ) external payable returns (uint256 _raffleId) {
+        // raffle must last at least 1 hour
+        if (endTimestamp <= block.timestamp + MINIMUM_RAFFLE_DURATION) revert InvalidEndDate();
+        // if creating a raffle using Ether as the asset raffled
+        if (assetContract == address(0)) {
+            // we need to check that msg.value == nftIdOrAmount
+            if (msg.value != nftIdOrAmount) revert NotEnoughEther();
+        } else {
+            // we want to make sure that the user has enough tokens
+            if (ERC20(assetContract).balanceOf(msg.sender) < nftIdOrAmount) revert NotEnoughTokens();
+        }
+        // at least 2 tickets per raffle 
+        if (numberOfTickets < MINIUM_NUMBER_OF_TICKETS) revert NotEnoughTickets();
+        
+        unchecked {
+            _raffleId = ++raffleCounter;
+            raffles[_raffleId] = RaffleData({
+                assetContract: assetContract,
+                raffleOwner: msg.sender,
+                raffleWinner: address(0),
+                raffleState: RaffleState.IN_PROGRESS,
+                raffleType: RaffleType.ERC20,
+                nftIdOrAmount: uint128(nftIdOrAmount),
+                currency: currency,
+                pricePerTicket: uint128(pricePerTicket),
+                MerkleRoot: MerkleRoot,
+                endTimestamp: uint64(endTimestamp),
+                numberOfTickets: uint64(numberOfTickets),
+                ticketsSold: 0
+            });
+            
+            emit NewRaffleCreated(_raffleId);
+        }   
+
+        // take money if not ether 
+        if (assetContract != address(0)) {
+            /// @notice here we make sure deflationary tokens are not accepted
+            // check balance before and after
+            uint256 balanceBefore = ERC20(assetContract).balanceOf(address(this));
+            ERC20(assetContract).safeTransferFrom(msg.sender, address(this), nftIdOrAmount);
+            uint256 balanceAfter = ERC20(assetContract).balanceOf(address(this));
+            // double check we received the assets
+            if(balanceBefore + nftIdOrAmount != balanceAfter) revert ERC20NotTransferred();
+        }
+    }
     
     /// @notice Allows raffle owners to cancel a raffle 
     /// @param _raffleId <uint256> ID of the raffle to be cancelled
@@ -156,12 +300,24 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         RaffleData memory raffleData = raffles[_raffleId];
         // cannot cancel someone else's raffle
         if (msg.sender != raffleData.raffleOwner) revert NotYourRaffle();
-        // the raffle must be in progress to be cancelled
-        // if (raffleData.raffleWinner != address(0)) revert RaffleClaimed(); 
-        if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
+        // raffle owner can cancel:
+        // 1. after creating (IN_PROGRESS)
+        // 2. after people bought tickets (IN_PROGRESS)
+        // 3. after the deadline (IN_PROGRESS) 
+        // 4. after calling complete raffle 
+        // at this point, they would want to complete the raffle 
+        // because they will be paying the LINK fee
+        // however, to avoid a situation where the oracle is not 
+        // returning a random number, we allow to cancel before the
+        // random number is returned. Once the number if returned,
+        // the winner will be chosen and anyone can call claimRaffle to issue the reward
+        // and asset
+        if (
+            raffleData.raffleState != RaffleState.IN_PROGRESS &&
+            raffleData.raffleState != RaffleState.FINISHED 
+        ) revert RaffleCannotBeCancelled();
 
         // Set is as REFUNDED
-        // raffles[_raffleId].raffleOwner = address(0);
         raffles[_raffleId].raffleState = RaffleState.REFUNDED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
 
@@ -188,7 +344,7 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         // check if the raffle exists
         if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
         // check that the raffle has not ended yet
-        // if (block.timestamp > raffleData.endTimestamp) revert RaffleEnded();
+        if (block.timestamp > raffleData.endTimestamp) revert RaffleEnded();
         // the raffle must be in progress
         if (raffleData.raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
         // check that the raffle is not sold out yet
@@ -227,34 +383,72 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         }
     }
 
-    /// @notice Allows users to claim the raffle. Owner of the raffle will receive the payment and the winner his asset
+    /// @notice Creates a sell order for a ticket 
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to sell a ticket for
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to sell
+    /// @param _currency <address> The currency the user wants to sell the ticket for
+    /// @param _price <uint256> The price the user wants to sell the ticket for
+    function createTicketSellOrder(
+        uint256 _raffleId, 
+        uint256 _ticketId,
+        address _currency,
+        uint256 _price
+    ) external {
+        if (msg.sender != raffleTickets[_raffleId][_ticketId]) revert NotYourTicket();
+        // this check could pass for raffles that do not exist, however the check above would have already reverted
+        if (raffles[_raffleId].raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
+
+        Order storage order = ticketsOrders[_raffleId][_ticketId];
+        order.owner = msg.sender;
+        order.currency = _currency;
+        order.price = _price;
+
+        emit TicketSellOrderCreated(_raffleId, _ticketId, msg.sender, _currency, _price);
+    }
+
+    /// @notice Allows users to cancel a sell order for a ticket
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to cancel a sell order for
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to cancel a sell order for
+    function cancelTicketSellOrder(uint256 _raffleId, uint256 _ticketId) external {
+        if (msg.sender != ticketsOrders[_raffleId][_ticketId].owner) revert NotYourTicketOrder();
+
+        delete ticketsOrders[_raffleId][_ticketId];
+        emit TicketSellOrderCancelled(_raffleId, _ticketId, msg.sender);
+    }
+
+    /// @notice Allows users to buy a ticket from another user
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
-    function claimRaffle(uint256 _raffleId) external {
-        RaffleData storage raffleData = raffles[_raffleId];
-        if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
-        if (raffleData.raffleState != RaffleState.COMPLETED) revert RaffleNotCompleted();
+    /// @param _ticketId <uint256> The ID of the ticket the user wants to buy
+    /// @param _price <uint256> The price the user wants to buy the ticket for (frontrun protection)
+    /// @param _currency <address> The currency the user wants to buy the ticket for (frontrun protection)
+    function buyResaleTicket(uint256 _raffleId, uint256 _ticketId, uint256 _price, address _currency) external payable {
+        // store in memory
+        Order memory order = ticketsOrders[_raffleId][_ticketId];
+        if (order.owner == address(0)) revert TicketNotForSale();
+        // if the currency is Ether, they need to send the correct msg.value
+        // if _price is lower than the actual order price (buyer is trying to trick us by sending less Ether)
+        // we will still revert later when checking the price against the stored one 
+        if (order.currency == address(0) && msg.value != _price) revert NotEnoughEther();
+        // delete 
+        delete ticketsOrders[_raffleId][_ticketId];
 
-        // set state to claimed so it cannot be claimed again 
-        raffleData.raffleState = RaffleState.CLAIMED;
-        emit RaffleStateChanged(_raffleId, RaffleState.COMPLETED, RaffleState.CLAIMED);
+        /// @notice frontrun protection
+        // a seller could change the price and currency and the buyer might spend more tokens if their 
+        // allowance to the contract is high enough
+        if (order.price != _price) revert WrongPrice();
+        if (order.currency != _currency) revert WrongCurrency();
 
-        address raffleOwner = raffleData.raffleOwner;
-        address winner = raffleData.raffleWinner;
+        // make sure the raffle is still ongoing
+        if (raffles[_raffleId].raffleState != RaffleState.IN_PROGRESS) revert RaffleNotInProgress();
 
-        // Sending the asset/s to the winner
-        if (raffleData.raffleType == RaffleType.ERC721){
-            IERC721(raffleData.assetContract).transferFrom(address(this), winner, raffleData.nftIdOrAmount);
-        } else if (raffleData.raffleType == RaffleType.ERC20){
-            if (raffleData.assetContract == address(0)) _handleNativeTransfer(winner, raffleData.nftIdOrAmount);
-            else ERC20(raffleData.assetContract).safeTransfer(winner, raffleData.nftIdOrAmount);
-        }
+        // assign the ticket
+        _assignTicketToUser(msg.sender, _raffleId, _ticketId, _ticketId);
 
-        uint256 totalAmountEarned = raffleData.ticketsSold * raffleData.pricePerTicket;
-        address raffleCurrency = raffleData.currency;
+        emit TicketBoughtFromMarket(_raffleId, _ticketId, msg.sender, order.owner, _price, _currency);
 
-        // Payments to the raffle owner
-        if (raffleCurrency == address(0)) _handleNativeTransfer(raffleOwner, totalAmountEarned);
-        else ERC20(raffleCurrency).safeTransfer(raffleOwner, totalAmountEarned);
+        // take payment
+        if (_currency == address(0)) _handleNativeTransfer(order.owner, _price);
+        else ERC20(_currency).safeTransferFrom(msg.sender, order.owner, _price);
     }
 
     /// @notice Allows users to complete a Raffle. The winner of the raffle will receive the asset.
@@ -319,6 +513,36 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         }
     }
 
+    /// @notice Allows users to claim the raffle. Owner of the raffle will receive the payment and the winner his asset
+    /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
+    function claimRaffle(uint256 _raffleId) external {
+        RaffleData storage raffleData = raffles[_raffleId];
+        if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
+        if (raffleData.raffleState != RaffleState.COMPLETED) revert RaffleNotCompleted();
+
+        // set state to claimed so it cannot be claimed again 
+        raffleData.raffleState = RaffleState.CLAIMED;
+        emit RaffleStateChanged(_raffleId, RaffleState.COMPLETED, RaffleState.CLAIMED);
+
+        address raffleOwner = raffleData.raffleOwner;
+        address winner = raffleData.raffleWinner;
+
+        // Sending the asset/s to the winner
+        if (raffleData.raffleType == RaffleType.ERC721){
+            IERC721(raffleData.assetContract).transferFrom(address(this), winner, raffleData.nftIdOrAmount);
+        } else if (raffleData.raffleType == RaffleType.ERC20){
+            if (raffleData.assetContract == address(0)) _handleNativeTransfer(winner, raffleData.nftIdOrAmount);
+            else ERC20(raffleData.assetContract).safeTransfer(winner, raffleData.nftIdOrAmount);
+        }
+
+        uint256 totalAmountEarned = raffleData.ticketsSold * raffleData.pricePerTicket;
+        address raffleCurrency = raffleData.currency;
+
+        // Payments to the raffle owner
+        if (raffleCurrency == address(0)) _handleNativeTransfer(raffleOwner, totalAmountEarned);
+        else ERC20(raffleCurrency).safeTransfer(raffleOwner, totalAmountEarned);
+    }
+
     /// @notice Allows users to claim a cancelled raffle where they will receive their initially payment
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
     /// @param ticketIds <uint256[]> Array of ticketIds to claim
@@ -363,19 +587,6 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         );
     }
 
-    /// @notice collects the LINK fee for the random number needed 
-    /// @notice for the raffle
-    function _takeLINKFee() private {
-        // calculate fee 
-        uint256 linkFee = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
-        // we need to take the payment for the LINK fee
-        uint256 linkBalanceBefore = LINK.balanceOf(address(this));
-        LINK.transferFrom(msg.sender, address(this), linkFee);
-        uint256 linkBalanceAFter = LINK.balanceOf(address(this));
-        // make sure the fee is paid
-        if (linkBalanceBefore + linkFee != linkBalanceAFter) revert LinkFeeNotPaid();
-    }
-
     /// @notice Callback function used by VRF Coordinator
     /// @notice This function is called by the VRF Coordinator when the VRF
     /// @notice output is ready to be consumed.
@@ -386,6 +597,9 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         RaffleData storage raffleData = raffles[raffleId];
         /// should not happen but what if VRF calls back twice? this next check will prevent
         if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
+        // we also want to check that the raffle was not cancelled before the 
+        // random number is received
+        if (raffleData.raffleState == RaffleState.REFUNDED) revert RaffleWasCancelled();
         raffleData.raffleState = RaffleState.COMPLETED;
         emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
         // Picking up the winner
@@ -393,11 +607,20 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         raffleData.raffleWinner = raffleTickets[raffleId][winningIndex];
     }
 
-    /// @notice Allows to set the raffle data (Mock contract for testing)
-    /// @param raffleId <uint256> The ID of the raffle
-    /// @param raffleData <RaffleData> The raffle data
-    function setRaffle(uint256 raffleId, RaffleData calldata raffleData) external {
-        raffles[raffleId] = raffleData;
+    /// @notice test function to simulate ChainLink VRF
+    function fulfillRandomWordsTest(uint256 _requestId, uint256[] memory _randomWords) external {
+        uint256 raffleId = vrfRequestToRaffleID[_requestId];
+        RaffleData storage raffleData = raffles[raffleId];
+        /// should not happen but what if VRF calls back twice? this next check will prevent
+        if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
+        // we also want to check that the raffle was not cancelled before the 
+        // random number is received
+        if (raffleData.raffleState == RaffleState.REFUNDED) revert RaffleWasCancelled();
+        raffleData.raffleState = RaffleState.COMPLETED;
+        emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
+        // Picking up the winner
+        uint256 winningIndex = uint256(_randomWords[0]) % raffleData.ticketsSold;
+        raffleData.raffleWinner = raffleTickets[raffleId][winningIndex];
     }
 
     /// @notice Handle native transfers
@@ -415,13 +638,6 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         }
     }
 
-    /// @notice Test wrapper for _handleNativeTransfer
-    /// @param _dest <address> The destination address
-    /// @param _amount <uint256> The amount to transfer
-    function handleNativeTransfer(address _dest, uint256 _amount) external {
-        _handleNativeTransfer(_dest, _amount);
-    }
-
     /// @notice set the tickets to its owner
     /// @param user <address> The user to assign the tickets to
     /// @param _raffleId <uint256> The raffle ID
@@ -436,19 +652,23 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         }
     }
 
-    /// @notice wrapper around _assignTicketToUser for testing only
-    /// @param user <address> The user to assign the tickets to
-    /// @param _raffleId <uint256> The raffle ID
-    /// @param initTicketId <uint256> The first ticket ID
-    /// @param endTicketId <uint256> The last ticket ID
-    function assignTicketToUser(address user, uint256 _raffleId, uint256 initTicketId, uint256 endTicketId) external {
-        _assignTicketToUser(user, _raffleId, initTicketId, endTicketId);
-    }
-
     /// @notice Checks if a raffle exists
     /// @param _raffleId <uint256> The ID of the raffle
     function _raffleExists(uint256 _raffleId) private view {
         if (_raffleId > raffleCounter) revert RaffleDoesNotExist();
+    }
+
+    /// @notice collects the LINK fee for the random number needed 
+    /// @notice for the raffle
+    function _takeLINKFee() private {
+        // calculate fee 
+        uint256 linkFee = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
+        // we need to take the payment for the LINK fee
+        uint256 linkBalanceBefore = LINK.balanceOf(address(this));
+        LINK.transferFrom(msg.sender, address(this), linkFee);
+        uint256 linkBalanceAFter = LINK.balanceOf(address(this));
+        // make sure the fee is paid
+        if (linkBalanceBefore + linkFee != linkBalanceAFter) revert LinkFeeNotPaid();
     }
 
     /// @notice Returns the raffle details
@@ -476,6 +696,4 @@ contract MockRaffleFiSetter is VRFV2WrapperConsumerBase {
         owner = raffleTickets[_raffleId][_ticketId];
         if (owner == address(0)) revert TicketDoesNotExist();
     }
-
-    receive() external payable {}
 }

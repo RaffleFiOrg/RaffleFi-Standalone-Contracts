@@ -1,4 +1,4 @@
-name: Contracts-Build-Test
+name: CI-TESTS
 
 on:
   push: 
