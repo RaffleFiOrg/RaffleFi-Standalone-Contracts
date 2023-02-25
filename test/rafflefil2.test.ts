@@ -720,7 +720,7 @@ describe("RaffleFi", function () {
         it("should not refund if the raffle was completed", async () => {})
     })
 
-    describe.only("Complete", () => {
+    describe("Complete", () => {
         const ticketPriceUSDT = utils.parseUnits("1", 18)
         const ticketPriceUSDC = utils.parseUnits("1", 6)
         beforeEach(async () => {
@@ -757,12 +757,12 @@ describe("RaffleFi", function () {
             await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
         })
         it("should prevent from completing a raffle without paying the VRF fee (all tickets sold)", async () => {
-            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
-            await network.provider.send("evm_mine")
             await expect(raffleFi.connect(user1).completeRaffle(1, true, {value: 0}))
             .to.be.revertedWithCustomError(raffleFi, "VRFFeeNotPaid")
         })
         it("should prevent from completing a raffle without paying the VRF fee (not all tickets sold)", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
             await expect(raffleFi.connect(user1).completeRaffle(2, true, {value: 0}))
             .to.be.revertedWithCustomError(raffleFi, "VRFFeeNotPaid")
         })
