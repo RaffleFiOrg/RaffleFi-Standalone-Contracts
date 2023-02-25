@@ -20,7 +20,7 @@ import "hardhat/console.sol";
    ░           ░  ░                  ░  ░   ░  ░        ░  
 */
 
-/// @title RaffleFL2
+/// @title RaffleFiL2
 /// @author unt4x3d && ctrlc03
 /// @notice RaffleFi main contract (suitable for use with Randomizer.AI VRF)
 contract RaffleFiL2 {
