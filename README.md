@@ -40,6 +40,8 @@ NOTE (3): we decided to allow a seller to cancel a raffle until the a winner is 
 
 ## Test
 
+### ChainLink version 
+
 Running tests will require a forked environment, as well as a live one for VRF tests. You will need to copy `.env-template` to `.env` and fill it:
 
 ```bash
@@ -71,7 +73,17 @@ ERC721_1=
 RAFFLEFI_TESTNET=
 ```
 
+### RandomizerAI Version 
+
+To run tests using the RandomizerAI version of RaffleFi you can type: 
+
+`yarn test:l2`
+
+No configuration is needed.
+
 ## Deploy
+
+### ChainLink version 
 
 To deploy, please fill the `.env` file -> `cp .env-template .env`:
 
@@ -87,6 +99,22 @@ VRF_RETRIES="3"
 ```
 
 You can deploy your own version using `yarn deploy:$network_name` for instance (for now) you can deploy to goerli using `yarn deploy:goerli`. To test deployment locally you can use `yarn deploy:test`.
+
+### RandomizerAI version 
+
+To deploy the L2 version (and maybe at some point for mainnet too, if Randomizer launches there too), fill the `.env` with the required variables:
+
+```bash 
+PRIV_KEY=""
+WETH_ADDR=""
+RANDOMIZER_ADDRESS=""
+RANDOMIZER_CONFIRMATIONS=""
+RANDOMIZER_CALLBACK_GAS=""
+```
+
+Make sure to include the correct RPC endpoints (`RPC_URL_ARBITRUM_TESTNET` or `RPC_URL_ARBITRUM`)
+
+Then use `yarn deploy:arb_testnet` or `yarn deploy:arbitrum`
 
 ## Utilities
 
