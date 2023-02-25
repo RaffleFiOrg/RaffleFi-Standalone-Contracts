@@ -39,7 +39,7 @@ jobs:
           GOERLI_VRF_WRAPPER: ${{ secrets.GOERLI_VRF_WRAPPER }}
           GOERLI_LINK_WHALE: ${{ secrets.GOERLI_LINK_WHALE }}
 
-      - name: Run Unit Test Randomizer:
+      - name: Run Unit Test Randomizer
         run: yarn test:l2
         env:
           RPC_URL_ARB_GOERLI: ${{ secrets.RPC_URL_ARB_GOERLI}}
