@@ -3,10 +3,10 @@ pragma solidity 0.8.17;
 
 import {SafeTransferLib} from "solmate/src/utils/SafeTransferLib.sol";
 import {MerkleProofLib} from "solmate/src/utils/MerkleProofLib.sol";
-import {VRFV2WrapperConsumerBase} from "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 import {ERC20} from "solmate/src/tokens/ERC20.sol";
-import {IERC721} from "./interfaces/IERC721.sol";
-import {IWETH} from "./interfaces/IWETH9.sol";
+import {IERC721} from "../interfaces/IERC721.sol";
+import {IWETH} from "../interfaces/IWETH9.sol";
+import {IRandomizer} from "../interfaces/IRandomizer.sol";
 
 /*
  ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
@@ -20,10 +20,10 @@ import {IWETH} from "./interfaces/IWETH9.sol";
    ░           ░  ░                  ░  ░   ░  ░        ░  
 */
 
-/// @title RaffleFi
+/// @title RaffleFL2
 /// @author unt4x3d && ctrlc03
-/// @notice RaffleFi main contract
-contract RaffleFi is VRFV2WrapperConsumerBase {
+/// @notice RaffleFi main contract (suitable for use with Randomizer.AI VRF)
+contract MockRaffleSetterL2 {
     using SafeTransferLib for ERC20;
 
     enum RaffleState {
@@ -75,14 +75,15 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @notice Number of raffles created so far
     uint256 public raffleCounter;
 
-    /// @notice WETH address
+    /// @notice WETH interface
     IWETH public immutable WETH;
+
+    /// @notice Randomizer.AI 
+    IRandomizer public immutable randomizer;
 
     /// @notice we enfoce a minimum number of tickets for each raffle 
     /// otherwise this might as well just be an exchange 
     uint8 public constant MINIUM_NUMBER_OF_TICKETS = 2;
-    /// @notice number of random numbers per request
-    uint8 public immutable numberOfWords;
     /// @notice number of confirmations for VRF request
     uint8 public immutable requestConfirmations;
     /// @notice we enforce a minimum duration for the raffle of 1 hour
@@ -111,7 +112,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error TicketDoesNotExist();
     error UserNotWhitelisted();
     error RaffleAlreadyCompleted();
-    error LinkFeeNotPaid();
+    error VRFFeeNotPaid();
     error NotYourTicket();
     error NotYourTicketOrder();
     error WrongPrice();
@@ -119,6 +120,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     error TicketNotForSale();
     error RaffleCannotBeCancelled();
     error RaffleWasCancelled();
+    error NotRandomizer();
 
     /// @notice events 
     event NewRaffleCreated(uint256 raffleId);
@@ -159,21 +161,17 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
 
     /// @notice constructor
     /// @param _weth <address> Address of the WETH contract
-    /// @param _link <address> Address of the LINK token
-    /// @param _wrapper <address> Address of the Chainlink VRF Wrapper
-    /// @param _numOfWords <uint8> Number of random numbers per request
+    /// @param _randomizer <address> Address of the Randomizer.AI contract
     /// @param _callbackGasLimit <uint32> Callback gas limit for VRF request
     /// @param _requestConfirmations <uint8> Number of confirmations for VRF request
     constructor(
         address _weth,
-        address _link,
-        address _wrapper,
-        uint8 _numOfWords,
+        address _randomizer,
         uint32 _callbackGasLimit,
         uint8 _requestConfirmations
-    ) payable VRFV2WrapperConsumerBase(_link, _wrapper) {
+    ) payable {
         WETH = IWETH(_weth);
-        numberOfWords = _numOfWords;
+        randomizer = IRandomizer(_randomizer);
         callbackGasLimit = _callbackGasLimit;
         requestConfirmations = _requestConfirmations;
     }
@@ -305,7 +303,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         // 3. after the deadline (IN_PROGRESS) 
         // 4. after calling complete raffle 
         // at this point, they would want to complete the raffle 
-        // because they will be paying the LINK fee
+        // because they will be paying the Ether fee for the VRF
         // however, to avoid a situation where the oracle is not 
         // returning a random number, we allow to cancel before the
         // random number is returned. Once the number if returned,
@@ -453,7 +451,7 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
     /// @notice Allows users to complete a Raffle. The winner of the raffle will receive the asset.
     /// @param _raffleId <uint256> The ID of the raffle the user wants to buy a ticket for
     /// @param accept <bool> If the user accepts the raffle to be completed
-    function completeRaffle(uint256 _raffleId, bool accept) external {
+    function completeRaffle(uint256 _raffleId, bool accept) external payable {
         RaffleData memory raffleData = raffles[_raffleId];
         // raffle must exist
         if (raffleData.raffleOwner == address(0)) revert RaffleDoesNotExist();
@@ -497,18 +495,14 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
                 raffles[_raffleId].raffleState = RaffleState.REFUNDED;
                 emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.REFUNDED);
             } else {
+                uint256 estimateFee = randomizer.estimateFee(callbackGasLimit, requestConfirmations);
+                if (msg.value != estimateFee) revert VRFFeeNotPaid();
                 /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-                uint256 vrfRequestId = _requestRandomness(_raffleId);
-                vrfRequestToRaffleID[vrfRequestId] = _raffleId;
-
-                emit VRFRequest(vrfRequestId);
+                _requestRandomness(_raffleId);
             }
         } else {
             /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-            uint256 vrfRequestId = _requestRandomness(_raffleId);
-            vrfRequestToRaffleID[vrfRequestId] = _raffleId;
-
-            emit VRFRequest(vrfRequestId);
+            _requestRandomness(_raffleId); 
         }
     }
 
@@ -569,30 +563,14 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         ERC20(raffleData.currency).safeTransfer(msg.sender, totalRefund);
     }
 
-    /// @notice Requests randomness to ChainLink VRF
-    /// @param _raffleId <uint256> The ID of the raffle
-    /// @return requestId <uint256> The ID of the VRF request
-    function _requestRandomness(uint256 _raffleId) internal returns (uint256 requestId) {
-        RaffleData storage raffleData = raffles[_raffleId];
-        raffleData.raffleState = RaffleState.FINISHED;
-        emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
-        // take LINK fee
-        _takeLINKFee();
-        // request random number 
-        requestId = requestRandomness(
-            callbackGasLimit,
-            requestConfirmations,
-            numberOfWords
-        );
-    }
-
-    /// @notice Callback function used by VRF Coordinator
-    /// @notice This function is called by the VRF Coordinator when the VRF
+    /// @notice Callback function used by the VRF contract
+    /// @notice This function is called by the VRF contract when the VRF
     /// @notice output is ready to be consumed.
-    /// @param _requestId <uint256> The ID of the VRF request
-    /// @param _randomWords <uint256[]> The VRF output
-    function fulfillRandomWords(uint256 _requestId, uint256[] memory _randomWords) internal override {
-        uint256 raffleId = vrfRequestToRaffleID[_requestId];
+    /// @param _id <uint256> The ID of the VRF request
+    /// @param _value <bytes32> The VRF output
+    function randomizerCallback(uint256 _id, bytes32 _value) external {
+        if (msg.sender != address(randomizer)) revert NotRandomizer();
+        uint256 raffleId = vrfRequestToRaffleID[_id];
         RaffleData storage raffleData = raffles[raffleId];
         /// should not happen but what if VRF calls back twice? this next check will prevent
         if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
@@ -602,8 +580,54 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         raffleData.raffleState = RaffleState.COMPLETED;
         emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
         // Picking up the winner
-        uint256 winningIndex = uint256(_randomWords[0]) % raffleData.ticketsSold;
+        uint256 winningIndex = uint256(_value) % raffleData.ticketsSold;
         raffleData.raffleWinner = raffleTickets[raffleId][winningIndex];
+    }
+
+    /// @notice Callback function used by the VRF contract (test only)
+    /// @notice This function is called by the VRF contract when the VRF
+    /// @notice output is ready to be consumed.
+    /// @param _id <uint256> The ID of the VRF request
+    /// @param _value <bytes32> The VRF output
+    function mockRandomizerCallback(uint256 _id, bytes32 _value) external {
+        // if (msg.sender != address(randomizer)) revert NotRandomizer();
+        uint256 raffleId = vrfRequestToRaffleID[_id];
+        RaffleData storage raffleData = raffles[raffleId];
+        /// should not happen but what if VRF calls back twice? this next check will prevent
+        if (raffleData.raffleState == RaffleState.COMPLETED) revert RaffleAlreadyCompleted();
+        // we also want to check that the raffle was not cancelled before the 
+        // random number is received
+        if (raffleData.raffleState == RaffleState.REFUNDED) revert RaffleWasCancelled();
+        raffleData.raffleState = RaffleState.COMPLETED;
+        emit RaffleStateChanged(raffleId, RaffleState.FINISHED, RaffleState.COMPLETED);
+        // Picking up the winner
+        uint256 winningIndex = uint256(_value) % raffleData.ticketsSold;
+        raffleData.raffleWinner = raffleTickets[raffleId][winningIndex];
+    }
+
+    /// @notice Allows to set the raffle data (Mock contract for testing)
+    /// @param raffleId <uint256> The ID of the raffle
+    /// @param raffleData <RaffleData> The raffle data
+    function setRaffle(uint256 raffleId, RaffleData calldata raffleData) external {
+        raffles[raffleId] = raffleData;
+    }
+
+    /// @notice Requests randomness to Randomizer.AI VRF
+    /// @param _raffleId <uint256> The ID of the raffle
+    function _requestRandomness(uint256 _raffleId) internal {
+        RaffleData storage raffleData = raffles[_raffleId];
+        raffleData.raffleState = RaffleState.FINISHED;
+        emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
+
+        // request random number 
+        uint256 requestId = randomizer.request(
+            callbackGasLimit,
+            requestConfirmations
+        );
+
+        vrfRequestToRaffleID[requestId] = _raffleId;
+
+        emit VRFRequest(requestId);
     }
 
     /// @notice Handle native transfers
@@ -621,6 +645,13 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         }
     }
 
+    /// @notice Test wrapper for _handleNativeTransfer
+    /// @param _dest <address> The destination address
+    /// @param _amount <uint256> The amount to transfer
+    function handleNativeTransfer(address _dest, uint256 _amount) external {
+        _handleNativeTransfer(_dest, _amount);
+    }
+
     /// @notice set the tickets to its owner
     /// @param user <address> The user to assign the tickets to
     /// @param _raffleId <uint256> The raffle ID
@@ -635,23 +666,19 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         }
     }
 
+    /// @notice wrapper around _assignTicketToUser for testing only
+    /// @param user <address> The user to assign the tickets to
+    /// @param _raffleId <uint256> The raffle ID
+    /// @param initTicketId <uint256> The first ticket ID
+    /// @param endTicketId <uint256> The last ticket ID
+    function assignTicketToUser(address user, uint256 _raffleId, uint256 initTicketId, uint256 endTicketId) external {
+        _assignTicketToUser(user, _raffleId, initTicketId, endTicketId);
+    }
+
     /// @notice Checks if a raffle exists
     /// @param _raffleId <uint256> The ID of the raffle
     function _raffleExists(uint256 _raffleId) private view {
         if (_raffleId > raffleCounter) revert RaffleDoesNotExist();
-    }
-
-    /// @notice collects the LINK fee for the random number needed 
-    /// @notice for the raffle
-    function _takeLINKFee() private {
-        // calculate fee 
-        uint256 linkFee = VRF_V2_WRAPPER.calculateRequestPrice(callbackGasLimit);
-        // we need to take the payment for the LINK fee
-        uint256 linkBalanceBefore = LINK.balanceOf(address(this));
-        LINK.transferFrom(msg.sender, address(this), linkFee);
-        uint256 linkBalanceAFter = LINK.balanceOf(address(this));
-        // make sure the fee is paid
-        if (linkBalanceBefore + linkFee != linkBalanceAFter) revert LinkFeeNotPaid();
     }
 
     /// @notice Returns the raffle details
@@ -679,4 +706,14 @@ contract RaffleFi is VRFV2WrapperConsumerBase {
         owner = raffleTickets[_raffleId][_ticketId];
         if (owner == address(0)) revert TicketDoesNotExist();
     }
+
+    /// @notice Calculate the fee for the VRF request 
+    /// @notice can be called in tandem with complete raffle
+    /// @notice by a frontend 
+    /// @return <uint256> The fee to pay
+    function estimateVRFFee() external view returns(uint256) {
+        return randomizer.estimateFee(callbackGasLimit, requestConfirmations);
+    }
+
+    receive() external payable {}
 }

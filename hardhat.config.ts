@@ -15,6 +15,7 @@ const CHAIN_IDS = {
   ganache: 1337,
   goerli: 5,
   hardhat: 31337,
+  arbitrumTestnet: 421613 
 };
 
 const randomPrivKey = ethers.Wallet.createRandom().privateKey.toString()
@@ -37,6 +38,13 @@ const config: HardhatUserConfig = {
       gas: GAS_LIMIT,
       blockGasLimit: GAS_LIMIT,
       chainId: CHAIN_IDS.goerli
+    },
+    arbitrum_testnet: {
+      url: process.env.RPC_URL_ARBITRUM_TESTNET || "https://goerli-rollup.arbitrum.io/rpc",
+      accounts: [process.env.PRIV_KEY || randomPrivKey, process.env.PRIV_KEY_2 || randomPrivKey, process.env.PRIV_KEY_3 || randomPrivKey],
+      gas: GAS_LIMIT,
+      blockGasLimit: GAS_LIMIT,
+      chainId: CHAIN_IDS.arbitrumTestnet
     }
   },
   paths: {

@@ -31,10 +31,15 @@ jobs:
       - name: Install dependencies
         run: yarn install
           
-      - name: Run Unit Test
-        run: yarn test
+      - name: Run Unit Test Mainnet
+        run: yarn test:link
         env:
           RPC_URL_GOERLI: ${{ secrets.RPC_URL_GOERLI }}
           GOERLI_LINK: ${{ secrets.GOERLI_LINK }}
           GOERLI_VRF_WRAPPER: ${{ secrets.GOERLI_VRF_WRAPPER }}
           GOERLI_LINK_WHALE: ${{ secrets.GOERLI_LINK_WHALE }}
+
+      - name: Run Unit Test Randomizer:
+        run: yarn test:l2
+        env:
+          RPC_URL_ARB_GOERLI: ${{ secrets.RPC_URL_ARB_GOERLI}}
