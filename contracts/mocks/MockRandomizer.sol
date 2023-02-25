@@ -8,6 +8,9 @@ interface IRaffleFi {
 contract MockRandomizer {
 
     uint256 public requestId;
+
+    mapping(address => uint256) public clientDeposits;
+
     function estimateFee(uint256 callbackGasLimit, uint256 requestConfirmation) external pure returns(uint256) {
         return 1;
     }
@@ -16,11 +19,13 @@ contract MockRandomizer {
         return ++requestId;
     }
 
+    function clientDeposit(address who) external payable {
+        clientDeposits[who] += msg.value;
+    }
+
     function sendRandomNumber(address contractAddress) external {
         uint256 num = 15;
         bytes32 random = bytes32(abi.encodePacked(num));
         IRaffleFi(contractAddress).randomizerCallback(requestId, random); 
-        // (bool res, ) = contractAddress.call(abi.encodeWithSignature("randomizerCallback(uint256, bytes32)", requestId, random));
-        // require(res, "MockRandomizer: failed to send random number");
     }
 }

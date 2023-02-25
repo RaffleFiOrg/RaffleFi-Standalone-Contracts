@@ -7,7 +7,7 @@ import {ERC20} from "solmate/src/tokens/ERC20.sol";
 import {IERC721} from "./interfaces/IERC721.sol";
 import {IWETH} from "./interfaces/IWETH9.sol";
 import {IRandomizer} from "./interfaces/IRandomizer.sol";
-import "hardhat/console.sol";
+
 /*
  ██▀███   ▄▄▄        █████▒ █████▒██▓    ▓█████   █████▒██▓
 ▓██ ▒ ██▒▒████▄    ▓██   ▒▓██   ▒▓██▒    ▓█   ▀ ▓██   ▒▓██▒
@@ -498,11 +498,13 @@ contract RaffleFiL2 {
                 uint256 estimateFee = randomizer.estimateFee(callbackGasLimit, requestConfirmations);
                 if (msg.value != estimateFee) revert VRFFeeNotPaid();
                 /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-                _requestRandomness(_raffleId);
+                _requestRandomness(_raffleId, estimateFee);
             }
         } else {
+            uint256 estimateFee = randomizer.estimateFee(callbackGasLimit, requestConfirmations);
+            if (msg.value != estimateFee) revert VRFFeeNotPaid();
             /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-            _requestRandomness(_raffleId); 
+            _requestRandomness(_raffleId, estimateFee); 
         }
     }
 
@@ -569,7 +571,6 @@ contract RaffleFiL2 {
     /// @param _id <uint256> The ID of the VRF request
     /// @param _value <bytes32> The VRF output
     function randomizerCallback(uint256 _id, bytes32 _value) external {
-        console.log("callback", _id);
         if (msg.sender != address(randomizer)) revert NotRandomizer();
         uint256 raffleId = vrfRequestToRaffleID[_id];
         RaffleData storage raffleData = raffles[raffleId];
@@ -587,10 +588,13 @@ contract RaffleFiL2 {
 
     /// @notice Requests randomness to Randomizer.AI VRF
     /// @param _raffleId <uint256> The ID of the raffle
-    function _requestRandomness(uint256 _raffleId) internal {
+    function _requestRandomness(uint256 _raffleId, uint256 estimateFee) internal {
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
+
+        // need to deposit into the randomizer contract first
+        randomizer.clientDeposit{value: estimateFee}(address(this));
 
         // request random number 
         uint256 requestId = randomizer.request(

@@ -498,11 +498,13 @@ contract MockRaffleSetterL2 {
                 uint256 estimateFee = randomizer.estimateFee(callbackGasLimit, requestConfirmations);
                 if (msg.value != estimateFee) revert VRFFeeNotPaid();
                 /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-                _requestRandomness(_raffleId);
+                _requestRandomness(_raffleId, estimateFee);
             }
         } else {
+            uint256 estimateFee = randomizer.estimateFee(callbackGasLimit, requestConfirmations);
+            if (msg.value != estimateFee) revert VRFFeeNotPaid();
             /// @notice This will mark the raffle State as FINISHED. Can only be called once.
-            _requestRandomness(_raffleId); 
+            _requestRandomness(_raffleId, estimateFee); 
         }
     }
 
@@ -614,10 +616,13 @@ contract MockRaffleSetterL2 {
 
     /// @notice Requests randomness to Randomizer.AI VRF
     /// @param _raffleId <uint256> The ID of the raffle
-    function _requestRandomness(uint256 _raffleId) internal {
+    function _requestRandomness(uint256 _raffleId, uint256 _estimateFee) internal {
         RaffleData storage raffleData = raffles[_raffleId];
         raffleData.raffleState = RaffleState.FINISHED;
         emit RaffleStateChanged(_raffleId, RaffleState.IN_PROGRESS, RaffleState.FINISHED);
+
+        // deposit fee to VRF contract
+        randomizer.clientDeposit{value: _estimateFee}(address(this));
 
         // request random number 
         uint256 requestId = randomizer.request(

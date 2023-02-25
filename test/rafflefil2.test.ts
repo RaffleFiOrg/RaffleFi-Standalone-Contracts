@@ -720,7 +720,7 @@ describe("RaffleFi", function () {
         it("should not refund if the raffle was completed", async () => {})
     })
 
-    describe("Complete", () => {
+    describe.only("Complete", () => {
         const ticketPriceUSDT = utils.parseUnits("1", 18)
         const ticketPriceUSDC = utils.parseUnits("1", 6)
         beforeEach(async () => {
@@ -756,19 +756,28 @@ describe("RaffleFi", function () {
             await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
             await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
         })
+        it("should prevent from completing a raffle without paying the VRF fee (all tickets sold)", async () => {
+            await network.provider.send("evm_increaseTime", [60 * 60 * 2])
+            await network.provider.send("evm_mine")
+            await expect(raffleFi.connect(user1).completeRaffle(1, true, {value: 0}))
+            .to.be.revertedWithCustomError(raffleFi, "VRFFeeNotPaid")
+        })
+        it("should prevent from completing a raffle without paying the VRF fee (not all tickets sold)", async () => {
+            await expect(raffleFi.connect(user1).completeRaffle(2, true, {value: 0}))
+            .to.be.revertedWithCustomError(raffleFi, "VRFFeeNotPaid")
+        })
         it("should allow to complete an ERC721 raffle with all tickets sold (set state to FINISHED)", async () => {
-            
-            await raffleFi.connect(user1).completeRaffle(1, true)
+            const completeFee = await raffleFi.estimateVRFFee()
+            await raffleFi.connect(user1).completeRaffle(1, true, {value: completeFee})
             const raffle = await raffleFi.getRaffleDetails(1)
             expect(raffle.raffleState).to.be.eq(1) // FINISHED
             expect(raffle.ticketsSold).to.be.eq(10)
         })
         it("should allow to complete an ERC20 raffle with all tickets sold (set state to FINISHED)", async () => {
-            
             await USDC.connect(user2).approve(raffleFi.address, ticketPriceUSDC.mul(5))
             await raffleFi.connect(user2).buyRaffleTicket(2, 5, [])
-            
-            await raffleFi.connect(user1).completeRaffle(2, true)
+            const completeFee = await raffleFi.estimateVRFFee()
+            await raffleFi.connect(user1).completeRaffle(2, true, {value: completeFee})
             const raffle = await raffleFi.getRaffleDetails(2)
             expect(raffle.raffleState).to.be.eq(1) // FINISHED
             expect(raffle.ticketsSold).to.be.eq(10)
