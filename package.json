@@ -5,8 +5,8 @@
     "test:live": "npx hardhat test test/rafflefi.live.ts --network goerli",
     "test:l2": "npx hardhat test test/rafflefil2.test.ts --network hardhat",
     "deploy:goerli": "npx hardhat run scripts/deploy.ts --network goerli",
-    "deploy:arb_testnet": "npx hardhat run scripts/deploy_l2.ts --network arbitrum_testnet",
-    "deploy:arbitrum": "npx hardhat run scripts/deploy_l2.ts --network arbitrum",
+    "deploy:arb_testnet": "npx hardhat run scripts/deployl2.ts --network arbitrum_testnet",
+    "deploy:arbitrum": "npx hardhat run scripts/deployl2.ts --network arbitrum",
     "deploy:test": "npx hardhat run scripts/deploy.ts",
     "merkle:generate": "npx ts-node scripts/genMerkleTree.ts",
     "coverage": "npx hardhat coverage --network hardhat --testfiles test/rafflefi.ts"
